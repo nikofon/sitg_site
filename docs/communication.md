@@ -117,4 +117,5 @@ problem. Interpret the stable code as well as the HTTP status. The client also s
 
 API responses use `Cache-Control: no-store`. Session credentials belong in memory/HTTP-only
 cookies, never local storage. Do not log callback query strings, cookies, CSRF values,
-real names, or private registration details. See deployment for proxy logging configuration.
+real names, or private registration details. See [backend integration](backend-integration.md)
+for domain and callback logging requirements.

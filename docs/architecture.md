@@ -1,5 +1,8 @@
 # Website architecture
 
+For website features, start with the [user guide](features.md). This page describes
+how those features are organized in the code and connected to the SITG backend.
+
 ## Boundaries
 
 ```mermaid
@@ -40,10 +43,12 @@ binds each session to its exact origin.
 | `api/` | Backend contract snapshots |
 | `deploy/nginx.conf.example` | Separate-domain deployment example |
 
-The implementation uses TypeScript, Vite, and direct DOM rendering. Existing screen
-implementations were forked at separation to preserve behavior. They are now owned locally;
-you can redesign navigation, components, styling, or page composition independently.
-No build step copies files from another project.
+The implementation uses TypeScript, Vite, and direct DOM rendering. Entry point, navigation,
+styles, translations, API client, and tests all belong to this repository.
+No build step copies files from another project. See [backend integration](backend-integration.md)
+for the domain and proxy boundaries.
+
+## Screen organization
 
 The shell fills the viewport; wide result tables scroll inside the content column.
 Player and tournament profiles use `src/ui/sections.ts` for one visible section at a time.
@@ -68,20 +73,26 @@ all groups by default, with an optional group filter; CSV imports remain local u
 Server projections are authoritative. A displayed manager button or cached `is_admin` flag
 never grants permission. Do not infer entitlement from a URL or an identifier.
 
-## Making changes
+## Project conventions
 
 - Keep browser interaction and presentation here. Request new server operations for new
   business behavior; do not simulate permission checks or rating changes in the browser.
-- Render names and server text through text nodes. Keep private projections out of logs.
 - When adding a route, update route matching, navigation, API types, and relevant UI tests.
 - Use returned rulesets and capability descriptors rather than hard-coding new variants.
 - Preserve exposure confirmations and explicit destructive-action labels.
 - Add localization keys to both catalogs.
-- Run the relevant `npm test -- ...` files and `npm run build`. Tests use Vitest/jsdom.
 - For API changes, update the local schema snapshots and these documents with the backend release.
 
-The bundled request schemas were exported from the backend's Pydantic operation models,
-and the HTTP inventory from its registered routes. Each schema under `models` has its own
+## API references
+
+- [Authentication and requests](communication.md): session lifecycle and request handling.
+- [Read API](api-reads.md): resource routes, filters, and visibility.
+- [Mutation API](api-mutations.md): actions, versions, and confirmations.
+- [Response types](../src/api/types.ts): payloads consumed by the website.
+
+The bundled [request schemas](../api/request-models.json) were exported from the backend's
+Pydantic operation models, and the [HTTP inventory](../api/http-routes.json) from its
+registered routes. Each schema under `models` has its own
 `$id` and local `$defs`. They are machine-readable artifacts, not an OpenAPI specification.
 The inventory is a 2026-09-15 snapshot. Newer verified endpoints are listed in
 [contract additions](api-changes.md); a schema name alone does not create an endpoint.
