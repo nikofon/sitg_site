@@ -1,0 +1,47 @@
+# Include inside nginx's http {} block after replacing all example values.
+server {
+    listen 443 ssl;
+    server_name website.example.com;
+    ssl_certificate /etc/letsencrypt/live/website.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/website.example.com/privkey.pem;
+    root /srv/sitg-website/dist;
+    index index.html;
+    client_max_body_size 5m;
+
+    location ^~ /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location ^~ /auth/ {
+        access_log off;
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location ^~ /assets/ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header X-Content-Type-Options nosniff;
+    }
+    location / {
+        try_files $uri /index.html;
+        add_header Cache-Control no-cache;
+        add_header Referrer-Policy no-referrer;
+        add_header X-Content-Type-Options nosniff;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'";
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name mini-app.example.com;
+    ssl_certificate /etc/letsencrypt/live/mini-app.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mini-app.example.com/privkey.pem;
+    client_max_body_size 5m;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

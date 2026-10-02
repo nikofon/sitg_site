@@ -1,0 +1,3158 @@
+import { ApiClient, ApiError } from "./api/client";
+import type {
+  RoutePayload,
+  LibraryAccess,
+  RouteResource,
+  LobbyResource,
+  GameObservation,
+  OngoingGame,
+  OngoingLobby,
+  OngoingResource,
+  StableErrorCode,
+  TournamentAction,
+  TournamentListItem,
+  TournamentManagerSettingsResource,
+  TournamentManagerManagementResource,
+  ManagementPacket,
+  ClassicStage,
+  ClassicTournament,
+  ManagerSettingDescriptor,
+  PacketDraftResource,
+  PlayerGameResource,
+  PlayerProfileResource,
+  RegisteredAuthor,
+  TournamentRegistrationPayload,
+  TournamentRouteResource,
+  TournamentProfileResource,
+  TournamentChatResource,
+  AuthorLinksResource,
+  AuthorSearchPage,
+  AdminSuspicionInspectionPayload,
+  AdminSuspicionLedgerResource,
+  SuspicionLedgerCard,
+  AdminManagementResource,
+  AdminCard,
+} from "./api/types";
+import { I18n } from "./i18n";
+import type { MessageKey } from "./i18n/en";
+import { Router } from "./routing/router";
+import { routeRequestPath, type RouteMatch } from "./routing/routes";
+import { FilterStore } from "./state/filter-store";
+import { element, replaceChildren } from "./ui/dom";
+import { filterNames, renderFilters } from "./ui/filters";
+import { renderLobbyPackets, type LobbyPacketFilters } from "./ui/lobby-packets";
+import { renderLibrary, renderLibraryReader } from "./ui/library";
+import { renderPlayerGame, renderPlayerProfile } from "./ui/profile";
+import { renderAdminManagement } from "./ui/admin-management";
+import { renderTournamentProfile } from "./ui/tournament";
+import { renderAuthorProfile, renderAuthors } from "./ui/authors";
+import { renderSubscriptions } from "./ui/subscriptions";
+import { renderClassicSeeding } from "./ui/classic-seeding";
+import { renderChatSchedule } from "./ui/chat-schedule";
+import { createSettingDemo, MESSAGE_FLOW_SETTINGS, type SettingDemo } from "./ui/setting-demo";
+
+export class WebsiteShell {
+  private readonly i18n = new I18n("ru");
+  private readonly filters = new FilterStore();
+  private request?: AbortController;
+  private pollTimer?: number;
+  private eventTimer?: number;
+  private readonly lobbyPacketFilters = new Map<string, LobbyPacketFilters>();
+  private managerSection?: {
+    tournamentRef?: string;
+    name: TournamentManagerManagementResource["sections"][number];
+  };
+
+  constructor(
+    private readonly root: HTMLElement,
+    private readonly api: ApiClient,
+    private readonly router: Router,
+  ) {}
+
+  start(): void {
+    this.router.subscribe((route) => void this.load(route));
+    this.router.start();
+  }
+
+  stop(): void {
+    this.request?.abort();
+    if (this.pollTimer !== undefined) window.clearTimeout(this.pollTimer);
+    if (this.eventTimer !== undefined) window.clearTimeout(this.eventTimer);
+    this.router.stop();
+  }
+
+  private async load(route: RouteMatch): Promise<void> {
+    this.request?.abort();
+    if (this.pollTimer !== undefined) window.clearTimeout(this.pollTimer);
+    if (this.eventTimer !== undefined) window.clearTimeout(this.eventTimer);
+    const restored = this.restoreFilters(route);
+    if (restored) return;
+    const controller = new AbortController();
+    this.request = controller;
+    this.renderFrame(route, this.statusCard("loading", this.i18n.t("common.loading")));
+    try {
+      let requestedPath = routeRequestPath(route);
+      if (route.id === "tournaments") {
+        const target = new URL(requestedPath, window.location.origin);
+        target.searchParams.set("include_managed_public", "true");
+        requestedPath = `${target.pathname}${target.search}`;
+      }
+      const path = encodeURIComponent(requestedPath);
+      const payload = await this.api.request<RoutePayload>(
+        `/api/miniapp/routes/resolve?path=${path}`,
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
+      if (payload.locale === "ru" || payload.locale === "en") {
+        this.i18n.setLocale(payload.locale);
+      }
+      if (!payload.authorization?.allowed) {
+        this.renderError(route, payload.authorization?.reason_code ?? "forbidden");
+        return;
+      }
+      this.renderRoute(route, payload);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      const code = error instanceof ApiError ? error.code : "internal_error";
+      this.renderError(route, code);
+    }
+  }
+
+  private restoreFilters(route: RouteMatch): boolean {
+    const names = filterNames(route.id);
+    if (names.length === 0) return false;
+    const persisted = this.filters.read(route.id);
+    const merged = new URLSearchParams(route.query);
+    let changed = false;
+    for (const name of names) {
+      if (!merged.has(name) && persisted[name]) {
+        merged.set(name, persisted[name]);
+        changed = true;
+      }
+    }
+    if (!changed) return false;
+    this.router.navigate(`${route.path}?${merged.toString()}`, { replace: true });
+    return true;
+  }
+
+  private renderFrame(route: RouteMatch, content: Node, controls?: Node, supportedPlayerOrders?: readonly string[]): void {
+    document.title = `${this.i18n.t(route.titleKey)} · ${this.i18n.t("app.name")}`;
+    const title = element("h1", { id: "page-title", tabindex: "-1" }, this.i18n.t(route.titleKey));
+    const header = element(
+      "header",
+      { className: "shell-header" },
+      element("div", { className: "brand", "aria-label": this.i18n.t("app.name") }, "SITG"),
+      this.renderAccountControls(route),
+    );
+    const filterBar = renderFilters(route.id, route.query, this.i18n, (name, value) => {
+      const query = new URLSearchParams(route.query);
+      if (value) query.set(name, value);
+      else query.delete(name);
+      query.delete("cursor");
+      query.delete("offset");
+      const values = Object.fromEntries(
+        filterNames(route.id)
+          .map((key) => [key, query.get(key) ?? ""] as const)
+          .filter((entry) => entry[1]),
+      );
+      this.filters.write(route.id, values);
+      this.router.navigate(`${route.path}${query.size ? `?${query.toString()}` : ""}`);
+    }, supportedPlayerOrders);
+    const main = element(
+      "main",
+      { id: "main", className: "shell-main", "aria-labelledby": "page-title" },
+      title,
+      controls ?? null,
+      filterBar,
+      content,
+    );
+    replaceChildren(this.root, element(
+      "div", { className: "shell website-shell" },
+      header, this.renderSidebar(route), main,
+    ));
+  }
+
+  private renderSidebar(route: RouteMatch): HTMLElement {
+    const sidebar = element("aside", { className: "website-sidebar" });
+    const nav = element("nav", { id: "site-navigation", "aria-label": this.i18n.t("website.navigation") });
+    const link = (path: string, title: MessageKey, active: boolean): void => {
+      nav.append(element("button", {
+        type: "button", className: "secondary-button", "data-path": path,
+        "aria-current": active ? "page" : undefined,
+        onclick: (() => this.router.navigate(path)) as EventListener,
+      }, this.i18n.t(title)));
+    };
+    const managed = route.query.get("role") === "manager" || route.id.startsWith("manager_");
+    link("/players", "website.players", route.id === "players");
+    link("/tournaments", "route.tournaments.title", route.id === "tournaments" && !managed);
+    link("/library", "route.library.title", route.id.startsWith("library"));
+    const viewer = this.api.viewer;
+    if (viewer) {
+      link(`/players/${viewer.player_id}`, "website.my_profile",
+        route.id === "player_profile" && route.params.player_id === viewer.player_id);
+      link("/authors", "authors.title", route.id === "authors" || route.id === "author_profile");
+      link("/authors/link", "route.authors_link.title", route.id === "authors_link");
+      link("/ongoing", "route.ongoing.title", route.id === "ongoing");
+      if (viewer.is_manager) link("/tournaments?role=manager", "website.my_tournaments", managed);
+      if (viewer.is_admin) link("/admin/management", "admin_management.title", route.id === "admin_management");
+    }
+    const toggle = element("button", {
+      type: "button", className: "website-menu-toggle", "aria-controls": "site-navigation",
+      "aria-expanded": "false",
+      onclick: (() => {
+        const open = sidebar.dataset.open !== "true";
+        sidebar.dataset.open = String(open);
+        toggle.setAttribute("aria-expanded", String(open));
+      }) as EventListener,
+    }, this.i18n.t("website.navigation"));
+    sidebar.append(toggle, nav);
+    return sidebar;
+  }
+
+  private renderAccountControls(route: RouteMatch): HTMLElement {
+    const controls = element("div", { className: "website-account-controls" });
+    const viewer = this.api.viewer;
+    if (viewer) {
+      controls.append(element("button", {
+        type: "button", className: "secondary-button",
+        onclick: (() => void this.api.logout().then(() => {
+          this.router.navigate("/tournaments");
+        }).catch((error: unknown) => {
+          this.renderError(route, error instanceof ApiError ? error.code : "internal_error");
+        })) as EventListener,
+      }, this.i18n.t("website.logout")));
+      if (viewer.registration_status !== "active") {
+        controls.append(element("button", {
+          type: "button", onclick: (() => window.location.assign("/auth/bot")) as EventListener,
+        }, this.i18n.t("website.finish_registration")));
+      }
+    } else {
+      controls.append(element("button", {
+        type: "button", className: "primary-button",
+        onclick: (() => window.location.assign("/auth/telegram")) as EventListener,
+      }, this.i18n.t("website.login")));
+    }
+    return controls;
+  }
+
+  private renderRoute(route: RouteMatch, payload: RoutePayload): void {
+    if (route.id === "authors" && "kind" in payload.resource && payload.resource.kind === "authors") {
+      this.renderFrame(route, renderAuthors(payload.resource, this.i18n, this.filters.read("authors"),
+        (filters) => this.filters.write("authors", filters), (path) => this.router.navigate(path)));
+      return;
+    }
+    if (route.id === "author_profile" && "kind" in payload.resource && payload.resource.kind === "author_profile") {
+      this.renderFrame(route, renderAuthorProfile(payload.resource, this.i18n, (path) => this.router.navigate(path)));
+      return;
+    }
+    if ("kind" in payload.resource && payload.resource.kind === "players") {
+      const resource = payload.resource;
+      const rulesetSelect = element("select", {
+        id: "players-ruleset",
+        onchange: (() => {
+          const query = new URLSearchParams(route.query);
+          query.set("ruleset", rulesetSelect.value);
+          query.delete("offset");
+          this.filters.write("players", Object.fromEntries(
+            filterNames("players").map(key => [key, query.get(key) ?? ""]),
+          ));
+          this.router.navigate(`/players?${query}`);
+        }) as EventListener,
+      });
+      for (const ruleset of resource.rulesets) {
+        const option = element("option", { value: ruleset.key }, ruleset.name);
+        option.selected = ruleset.key === resource.ruleset_key;
+        rulesetSelect.append(option);
+      }
+      rulesetSelect.disabled = resource.rulesets.length === 0;
+      const rulesetControl = element("label", { className: "players-ruleset", for: "players-ruleset" },
+        this.i18n.t("profile.ruleset"), rulesetSelect,
+      );
+      const list = element("ul", { className: "resource-list player-directory" });
+      for (const player of resource.items) {
+        const path = `/players/${encodeURIComponent(player.id)}?ruleset=${encodeURIComponent(resource.ruleset_key ?? "")}`;
+        list.append(element("li", {}, element("a", {
+          href: path,
+          onclick: ((event: MouseEvent) => {
+            if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            this.router.navigate(path);
+          }) as EventListener,
+        }, element("strong", {}, player.label), element("span", { className: "player-directory-stats" },
+          `${this.i18n.t("profile.rating")}: ${player.rating.toFixed(1)} · ${this.i18n.t("profile.games")}: ${player.games}`,
+        ))));
+      }
+      const content = element("section", {},
+        resource.items.length ? list : this.statusCard("empty", this.i18n.t("website.players_empty")),
+      );
+      const move = (offset: number): void => {
+        const query = new URLSearchParams(route.query);
+        query.set("offset", String(offset));
+        this.router.navigate(`/players?${query}`);
+      };
+      const offset = Number(route.query.get("offset") ?? 0);
+      if (offset > 0) content.append(element("button", {
+        type: "button", onclick: (() => move(0)) as EventListener,
+      }, this.i18n.t("website.first_page")));
+      if (resource.next_offset !== null) content.append(element("button", {
+        type: "button", onclick: (() => move(resource.next_offset!)) as EventListener,
+      }, this.i18n.t("website.next_page")));
+      this.renderFrame(route, content, rulesetControl, resource.supported_orders);
+      return;
+    }
+    if ("kind" in payload.resource && payload.resource.kind === "admin_management") {
+      this.renderAdminManagementRoute(route, payload.resource);
+      return;
+    }
+    if ("kind" in payload.resource && payload.resource.kind === "library") {
+      if (route.id === "library_reader") {
+        void this.accessLibrary(route, route.params.version_id ?? "", "view");
+      } else {
+        this.renderFrame(route, renderLibrary(
+          payload.resource.items, this.i18n, this.filters.read("library"),
+          (filters) => this.filters.write("library", filters),
+          (packet, command, button) => {
+            if (command === "view") this.router.navigate(`/library/${encodeURIComponent(packet.version_id)}`);
+            else void this.accessLibrary(route, packet.version_id, command, button);
+          },
+          (tournament) => this.router.navigate(`/tournaments/${encodeURIComponent(tournament.id)}`),
+        ));
+      }
+      return;
+    }
+    if (route.id === "ongoing" && isOngoingResource(payload.resource)) {
+      this.renderOngoing(route, payload.resource);
+      return;
+    }
+    if (route.id === "player_profile" && isPlayerProfileResource(payload.resource)) {
+      this.renderPlayerProfileRoute(route, payload.resource);
+      return;
+    }
+    if (route.id === "player_game" && isPlayerGameResource(payload.resource)) {
+      this.renderPlayerGameRoute(route, payload.resource);
+      return;
+    }
+    if (route.id === "tournaments" && isTournamentResource(payload.resource)) {
+      this.renderTournamentRoute(route, payload.resource, payload.pagination);
+      const info = route.query.get("info");
+      if (info) this.router.navigate(`/tournaments/${encodeURIComponent(info)}`, { replace: true });
+      return;
+    }
+    if (route.id === "tournament_profile" && isTournamentProfileResource(payload.resource)) {
+      this.renderFrame(route, renderTournamentProfile(payload.resource, this.i18n,
+        (value) => this.formatDate(value), {
+          section: route.query.get("section") ?? undefined,
+          selectSection: (section) => this.replaceSection(route, section),
+          openPlayer: (id) => this.router.navigate(`/players/${encodeURIComponent(id)}`),
+          openGame: (playerId, gameId) => this.router.navigate(
+            `/players/${encodeURIComponent(playerId)}/games/${encodeURIComponent(gameId)}`),
+        }));
+      return;
+    }
+    if (route.id === "chat_schedule" && isTournamentChatResource(payload.resource)) {
+      const chat = payload.resource;
+      this.renderFrame(route, renderChatSchedule(chat, this.i18n,
+        (value) => this.formatDate(value), (value) => void this.setChatGameTime(route, chat.chat_id, value)));
+      return;
+    }
+    if (route.id === "authors_link" && isAuthorLinksResource(payload.resource)) {
+      this.renderAuthorsLink(route, payload.resource);
+      return;
+    }
+    if (route.id === "manager_settings" && isManagerSettingsResource(payload.resource)) {
+      this.renderManagerSettings(route, payload.resource);
+      return;
+    }
+    if (route.id === "manager_management" && isManagerManagementResource(payload.resource)) {
+      this.renderManagerManagement(route, payload.resource);
+      return;
+    }
+    if (route.id === "admin_suspicion" && isSuspicionLedgerResource(payload.resource)) {
+      this.renderSuspicionLedger(route, payload.resource);
+      return;
+    }
+    if (route.id === "lobby" && isLobbyResource(payload.resource)) {
+      this.renderLobby(route, payload.resource);
+      return;
+    }
+    if (route.id === "packet_editor" && isPacketDraftResource(payload.resource)) {
+      this.renderPacketEditor(route, payload.resource);
+      return;
+    }
+    const resource = payload.resource as RouteResource;
+    let content: HTMLElement;
+    if (resource.state === "empty") {
+      content = this.statusCard("empty", this.i18n.t(route.emptyKey));
+    } else {
+      const children: Node[] = [];
+      if (resource.summary) {
+        children.push(element("p", { className: "resource-summary" }, resource.summary));
+      }
+      if (resource.items?.length) {
+        const list = element("ul", { className: "resource-list" });
+        for (const item of resource.items) {
+          list.append(
+            element(
+              "li",
+              {},
+              element("article", { className: "resource-card" }, element("h2", {}, item.label),
+                item.description ? element("p", {}, item.description) : null),
+            ),
+          );
+        }
+        children.push(list);
+      }
+      if (children.length === 0) children.push(this.statusCard("empty", this.i18n.t(route.emptyKey)));
+      content = element("section", { className: "route-content" }, ...children);
+    }
+    if (payload.pagination?.previous || payload.pagination?.next) {
+      content.append(this.pagination(route, payload.pagination));
+    }
+    this.renderFrame(route, content);
+    queueMicrotask(() => document.querySelector<HTMLElement>("#page-title")?.focus());
+  }
+
+  private async setChatGameTime(route: RouteMatch, chatId: string, plannedAt: string | null): Promise<void> {
+    try {
+      await this.api.request(`/api/miniapp/chats/${encodeURIComponent(chatId)}/game-time`, {
+        method: "POST", body: { planned_at: plannedAt },
+      });
+      await this.load(route);
+    } catch (error) {
+      this.renderError(route, error instanceof ApiError ? error.code : "internal_error");
+    }
+  }
+
+  private renderAuthorsLink(route: RouteMatch, resource: AuthorLinksResource): void {
+    const status = element("p", { className: "field-help", role: "status" });
+    const search = element("input", { type: "search", maxlength: "300",
+      placeholder: this.i18n.t("authors_link.search_placeholder"),
+      "aria-label": this.i18n.t("authors_link.search") });
+    const picker = element("select", { "aria-label": this.i18n.t("authors_link.select") },
+      element("option", { value: "" }, this.i18n.t("authors_link.select")));
+    let sequence = 0;
+    let timer: number | undefined;
+    const loadAuthors = async (): Promise<void> => {
+      const current = ++sequence;
+      try {
+        const page = await this.api.request<AuthorSearchPage>(
+          `/api/miniapp/authors?query=${encodeURIComponent(search.value)}`, { signal: this.request?.signal });
+        if (current !== sequence || !picker.isConnected) return;
+        replaceChildren(picker, element("option", { value: "" }, this.i18n.t("authors_link.select")),
+          ...page.items.map((author) => element("option", { value: author.author_id }, author.display_name)));
+        status.textContent = page.items.length ? "" : this.i18n.t("authors_link.no_matches");
+      } catch (error) {
+        if (current === sequence && !(error instanceof DOMException && error.name === "AbortError")) {
+          status.textContent = this.i18n.t(`error.${error instanceof ApiError ? error.code : "internal_error"}`);
+        }
+      }
+    };
+    search.addEventListener("input", () => {
+      sequence++;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void loadAuthors(), 200);
+    });
+    picker.addEventListener("focus", () => { if (!picker.options.length || picker.options.length === 1) void loadAuthors(); });
+    const note = element("textarea", { name: "note", maxlength: "1000", rows: "3",
+      placeholder: this.i18n.t("authors_link.note_placeholder") });
+    const submit = element("button", { type: "submit", className: "primary-button" }, this.i18n.t("authors_link.submit"));
+    const form = element("form", { className: "settings-form" },
+      element("label", {}, this.i18n.t("authors_link.search"), search),
+      element("label", {}, this.i18n.t("authors_link.select"), picker),
+      element("label", {}, this.i18n.t("authors_link.note"), note), status, submit);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!picker.value) { status.textContent = this.i18n.t("authors_link.select_required"); return; }
+      submit.disabled = true;
+      try {
+        await this.api.request("/api/miniapp/authors/link", {
+          method: "POST", body: { author_id: picker.value, note: note.value.trim() || null },
+          signal: this.request?.signal,
+        });
+        await this.load(route);
+      } catch (error) {
+        status.textContent = this.i18n.t(`error.${error instanceof ApiError ? error.code : "internal_error"}`);
+      } finally { submit.disabled = false; }
+    });
+    this.renderFrame(route, element("section", { className: "route-content authors-link" },
+      form, element("section", {}, element("h2", {}, this.i18n.t("authors_link.my_requests")),
+        resource.items.length ? element("ul", { className: "resource-list" }, ...resource.items.map((item) =>
+          element("li", {}, element("article", { className: "resource-card" },
+            element("h3", {}, item.author.display_name),
+            element("p", {}, `${this.i18n.t("authors_link.status")}: ${this.i18n.t(({
+              pending: "authors_link.status_pending", approved: "authors_link.status_approved",
+              rejected: "authors_link.status_rejected", cancelled: "authors_link.status_cancelled",
+            } as Record<string, MessageKey>)[item.status] ?? "authors_link.status_pending")}`),
+            element("p", {}, this.formatDate(item.created_at)),
+            item.request_note ? element("p", {}, item.request_note) : null,
+          )))) : element("p", {}, this.i18n.t("authors_link.no_requests")))));
+  }
+
+  private async accessLibrary(route: RouteMatch, version: string, command: "view" | "download", button?: HTMLButtonElement): Promise<void> {
+    const signal = this.request?.signal;
+    if (button) button.disabled = true;
+    try {
+      const admin = route.id === "admin_management";
+      const back = admin ? "/admin/management?section=packets" : "/library";
+      const path = admin
+        ? `/api/miniapp/admin/management/packets/${encodeURIComponent(version)}/${command}`
+        : `/api/miniapp/library/${encodeURIComponent(version)}/${command}`;
+      let result = await this.api.request<LibraryAccess>(path, { method: "POST", body: { confirm: false }, signal });
+      if (signal?.aborted) return;
+      if (result.confirmation_required) {
+        if (!window.confirm(this.i18n.t("library.confirm"))) {
+          if (command === "view") this.router.navigate(back, { replace: true });
+          return;
+        }
+        result = await this.api.request<LibraryAccess>(path, { method: "POST", body: { confirm: true }, signal });
+      }
+      if (signal?.aborted) return;
+      if ("pages" in result) {
+        this.renderFrame(route, element("section", {},
+          element("button", {
+            type: "button", className: "secondary-button",
+            onclick: (() => this.router.navigate(back)) as EventListener,
+          }, this.i18n.t("route.library.title")),
+          renderLibraryReader(result.name, result.pages, this.i18n)));
+      } else if ("queued" in result) {
+        this.showTextDialog(this.i18n.t("library.download"), [this.i18n.t("library.queued")]);
+      }
+    } catch (error) {
+      if (signal?.aborted) return;
+      const code = error instanceof ApiError ? error.code : "internal_error";
+      const message = code === "forbidden" ? this.i18n.t("library.unavailable") : this.i18n.t(`error.${code}`);
+      if (command === "view") {
+        this.renderFrame(route, element("section", {}, this.statusCard("error", message),
+          element("button", { type: "button", onclick: (() => this.router.navigate("/library")) as EventListener }, this.i18n.t("route.library.title"))));
+      } else this.showTextDialog(this.i18n.t("library.download"), [message]);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  private renderPacketEditor(route: RouteMatch, resource: PacketDraftResource): void {
+    const modifying = Boolean(resource.assignment_id);
+    const changes: Record<string, "correction" | "substitution"> = {};
+    const fieldAuthors = { ...resource.field_author_ids };
+    const managementPath = `/api/miniapp/manager/tournaments/${encodeURIComponent(route.params.launch_ref ?? "")}`;
+    const packet = structuredClone(resource.packet);
+    const authorBindings = new Map(Object.entries(resource.author_bindings ?? {}));
+    const associatedAuthors = new Map((resource.associated_authors ?? []).map((author) => [author.author_id, author]));
+    let leadAuthorId = resource.lead_author_id;
+    const authorsPath = modifying ? `${managementPath}/authors?return_author=true`
+      : `/api/miniapp/manager/packets/${encodeURIComponent(route.params.launch_ref ?? "")}/authors`;
+    let themeIndex = 0;
+    const form = element("form", { className: "settings-form packet-editor" }) as HTMLFormElement;
+    const label = (field: string): string => this.i18n.t(`packet_editor.${field}` as MessageKey);
+    const valueAt = (source: unknown, path: string): unknown => path.split(".").reduce<unknown>(
+      (value, key) => (value as Record<string, unknown>)[key], source,
+    );
+    const control = (field: string, value: string | number | null, multiline = false, path = field): HTMLElement => {
+      const item = element(
+        "label",
+        {},
+        label(field),
+        multiline
+          ? element("textarea", { "data-field": field, rows: "3" }, value == null ? "" : String(value))
+          : element("input", {
+              "data-field": field,
+              type: field === "year" || field === "value" ? "number" : "text",
+              value: value == null ? "" : String(value),
+            }),
+      );
+      if (modifying) {
+        const input = item.querySelector<HTMLInputElement | HTMLTextAreaElement>("[data-field]")!;
+        input.disabled = !changes[path];
+        let authorPicker: HTMLFieldSetElement | undefined;
+        if (field === "author" || field === "lead_author") {
+          authorPicker = element("fieldset", { disabled: !changes[path], className: "packet-field-author" },
+            this.registeredAuthorPicker(route, authorsPath,
+              associatedAuthors.get(fieldAuthors[path] ?? ""), (author) => {
+                fieldAuthors[path] = author?.author_id ?? null;
+                if (author) {
+                  associatedAuthors.set(author.author_id, author);
+                  input.value = author.display_name;
+                } else input.value = "";
+                input.dispatchEvent(new Event("change", { bubbles: true }));
+              }),
+          );
+          input.addEventListener("input", () => { fieldAuthors[path] = null; });
+        }
+        const buttons = element("span", { className: "packet-change-actions" });
+        const substitution = (path.startsWith("themes.") && field === "name")
+          || (path.includes(".questions.") && ["text", "answer", "accepted_answers", "rejected_answers"].includes(field));
+        for (const kind of substitution ? ["correction", "substitution"] as const : ["correction"] as const) {
+          const button = element("button", {
+            type: "button", className: `packet-change-button is-${kind}`,
+            title: this.i18n.t(`packet_management.${kind}`),
+            "aria-label": `${this.i18n.t(`packet_management.${kind}`)}: ${label(field)}`,
+            "aria-pressed": String(changes[path] === kind),
+          }, kind === "correction" ? "✎" : "↪");
+          button.addEventListener("click", () => {
+            if (changes[path] === kind) {
+              const current = field === "accepted_answers" || field === "rejected_answers"
+                ? input.value.split(/\n/).map((answer) => answer.trim()).filter(Boolean)
+                : field === "year" ? (input.value ? Number(input.value) : null)
+                : field === "value" ? Number(input.value) : input.value;
+              if (!input.validity.valid
+                || JSON.stringify(current) !== JSON.stringify(valueAt(resource.packet, path))
+                || fieldAuthors[path] !== resource.field_author_ids?.[path]) return;
+              // Capture a restored value before locking the field, including after page navigation.
+              input.dispatchEvent(new Event("change", { bubbles: true }));
+              delete changes[path];
+              input.disabled = true;
+              if (authorPicker) authorPicker.disabled = true;
+              button.setAttribute("aria-pressed", "false");
+              return;
+            }
+            changes[path] = kind;
+            input.disabled = false;
+            if (authorPicker) authorPicker.disabled = false;
+            for (const sibling of buttons.querySelectorAll("button")) sibling.setAttribute("aria-pressed", String(sibling === button));
+            input.focus();
+          });
+          buttons.append(button);
+        }
+        item.prepend(buttons);
+        if (authorPicker) item.append(authorPicker);
+      }
+      return item;
+    };
+    const diagnostics = (title: MessageKey, items: string[], kind: string): HTMLElement =>
+      element(
+        "section",
+        { className: `packet-diagnostics packet-${kind}` },
+        element("h2", {}, this.i18n.t(title)),
+        items.length
+          ? element("ul", { className: "detail-list" }, ...items.map((item) => element("li", {}, item)))
+          : element("p", { className: "field-help" }, this.i18n.t("packet_editor.none")),
+      );
+    const metadata = element("fieldset", {}, element("legend", {}, this.i18n.t("packet_editor.metadata")));
+    for (const field of resource.editor.packet_fields) {
+      const value = packet[field as keyof typeof packet];
+      if (field !== "themes") metadata.append(control(field, value as string | number | null));
+    }
+    const normalizeAuthor = (name: string): string => name.trim().replace(/\s+/g, " ");
+    const packetAuthors = (): string[] => [...new Set([
+      packet.lead_author,
+      ...packet.themes.flatMap((theme) => [theme.author, ...theme.questions.map((question) => question.author)]),
+    ].map(normalizeAuthor).filter(Boolean))];
+    const authorList = element("div", { className: "packet-author-list" });
+    const authorRows = new Map<string, HTMLElement>();
+    const markChanged = (): void => { if (publishButton) publishButton.disabled = true; };
+    const refreshAuthors = (): void => {
+      const names = packetAuthors();
+      for (const name of names) {
+        if (authorRows.has(name)) continue;
+        const row = element(
+          "section",
+          { className: "packet-author-association", "data-packet-author": name },
+          element("h3", {}, name),
+          this.registeredAuthorPicker(
+            route, authorsPath,
+            associatedAuthors.get(authorBindings.get(name) ?? ""),
+            (author) => {
+              if (author) {
+                authorBindings.set(name, author.author_id);
+                associatedAuthors.set(author.author_id, author);
+              } else authorBindings.delete(name);
+              markChanged();
+            },
+          ),
+        );
+        authorRows.set(name, row);
+      }
+      replaceChildren(authorList, ...names.map((name) => authorRows.get(name)!));
+    };
+    const leadInput = metadata.querySelector<HTMLInputElement>("[data-field=lead_author]");
+    if (leadInput && !modifying) {
+      const leadPicker = this.registeredAuthorPicker(
+        route, authorsPath, associatedAuthors.get(leadAuthorId ?? ""),
+        (author) => {
+          leadAuthorId = author?.author_id ?? null;
+          if (author) {
+            associatedAuthors.set(author.author_id, author);
+            leadInput.value = author.display_name;
+            packet.lead_author = author.display_name;
+          }
+          refreshAuthors();
+          markChanged();
+        },
+      );
+      leadInput.parentElement?.after(leadPicker);
+      leadInput.addEventListener("input", () => {
+        leadAuthorId = null;
+        packet.lead_author = leadInput.value;
+        const selected = leadPicker.querySelector<HTMLSelectElement>("select");
+        if (selected) selected.value = "";
+      });
+      leadInput.addEventListener("change", refreshAuthors);
+    }
+    if (!modifying) metadata.append(
+      element("h2", {}, this.i18n.t("packet_editor.authors")),
+      element("p", { className: "field-help" }, this.i18n.t("packet_editor.authors_help")),
+      authorList,
+    );
+    const page = element("section", { className: "packet-page" });
+    const decide = async (decision: "publish" | "reject"): Promise<void> => {
+      if (!window.confirm(this.i18n.t(`packet_editor.${decision}_confirm` as MessageKey))) return;
+      try {
+        const result = await this.api.request<{ status: string }>(
+          `/api/miniapp/manager/packets/${encodeURIComponent(route.params.launch_ref ?? "")}/${decision}`,
+          { method: "POST", body: {} },
+        );
+        const resolvedDecision = result.status === "published" ? "publish" : "reject";
+        this.renderFrame(
+          route,
+          this.statusCard("empty", this.i18n.t(`packet_editor.${resolvedDecision}ed` as MessageKey)),
+        );
+      } catch (error) {
+        const code = error instanceof ApiError ? error.code : "internal_error";
+        if (code === "stale_write") await this.load(route);
+        else this.showTextDialog(this.i18n.t(`error.${code}`), []);
+      }
+    };
+    const publishButton = resource.can_publish
+      ? element("button", { type: "button", className: "primary-button", onclick: (() => void decide("publish")) as EventListener }, this.i18n.t("packet_editor.publish")) as HTMLButtonElement
+      : null;
+    const capturePage = (): void => {
+      const theme = packet.themes[themeIndex];
+      if (!theme) return;
+      for (const input of page.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-theme-field]")) {
+        if (modifying && input.disabled) continue;
+        theme[input.dataset.themeField as "name" | "author" | "commentary"] = input.value;
+      }
+      for (const input of page.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-question-field]")) {
+        if (modifying && input.disabled) continue;
+        const question = theme.questions[Number(input.dataset.questionIndex)];
+        if (!question) continue;
+        const field = input.dataset.questionField as keyof typeof question;
+        if (field === "value") question.value = Number(input.value);
+        else if (field === "accepted_answers" || field === "rejected_answers") {
+          (question[field as "accepted_answers" | "rejected_answers"]) = input.value.split(modifying ? /\n/ : /\n|,/)
+            .map((item) => item.trim()).filter(Boolean);
+        } else {
+          (question[field] as string) = input.value;
+        }
+      }
+      if (!modifying) refreshAuthors();
+    };
+    page.addEventListener("change", capturePage);
+    const renderPage = (): void => {
+      const theme = packet.themes[themeIndex];
+      if (!theme) {
+        replaceChildren(page, this.statusCard("empty", this.i18n.t("packet_editor.no_themes")));
+        return;
+      }
+      const previous = element("button", { type: "button", className: "secondary-button", disabled: themeIndex === 0 }, this.i18n.t("common.previous"));
+      const next = element("button", { type: "button", className: "secondary-button", disabled: themeIndex >= packet.themes.length - 1 }, this.i18n.t("common.next"));
+      previous.addEventListener("click", () => { capturePage(); themeIndex -= 1; renderPage(); });
+      next.addEventListener("click", () => { capturePage(); themeIndex += 1; renderPage(); });
+      const themeFields = element("fieldset", {}, element("legend", {}, `${this.i18n.t("packet_editor.theme")} ${themeIndex + 1} / ${packet.themes.length}`));
+      for (const field of resource.editor.theme_fields) {
+        const item = control(field, theme[field as "name" | "author" | "commentary"] ?? "", field === "commentary", `themes.${themeIndex}.${field}`);
+        const input = item.querySelector<HTMLInputElement>("[data-field]");
+        if (input) { input.dataset.themeField = field; delete input.dataset.field; }
+        themeFields.append(item);
+      }
+      const questions = element("div", { className: "packet-questions" });
+      theme.questions.forEach((question, questionIndex) => {
+        const fields = element("fieldset", {}, element("legend", {}, `${this.i18n.t("packet_editor.question")} ${questionIndex + 1}`));
+        for (const field of resource.editor.question_fields) {
+          const current = field === "accepted_answers" ? question.accepted_answers.join("\n")
+            : field === "rejected_answers" ? (question.rejected_answers ?? []).join("\n")
+            : question[field as keyof typeof question];
+          const item = control(field, current as string | number, ["text", "answer", "accepted_answers", "rejected_answers", "commentary", "source"].includes(field), `themes.${themeIndex}.questions.${questionIndex}.${field}`);
+          const input = item.querySelector<HTMLInputElement | HTMLTextAreaElement>("[data-field]");
+          if (input) {
+            input.dataset.questionField = field;
+            input.dataset.questionIndex = String(questionIndex);
+            delete input.dataset.field;
+          }
+          fields.append(item);
+        }
+        questions.append(fields);
+      });
+      replaceChildren(
+        page,
+        element("nav", { className: "packet-page-nav" }, previous, element("strong", {}, theme.name || `${this.i18n.t("packet_editor.theme")} ${themeIndex + 1}`), next),
+        themeFields,
+        questions,
+      );
+    };
+    form.append(
+      diagnostics("packet_editor.errors", resource.errors, "errors"),
+      diagnostics("packet_editor.warnings", resource.warnings, "warnings"),
+      metadata,
+      page,
+      element(
+        "div",
+        { className: "settings-actions" },
+        element("button", { type: "submit", className: "primary-button" }, this.i18n.t(modifying ? "packet_management.save" : "packet_editor.save")),
+        modifying ? element("button", { type: "button", className: "secondary-button", onclick: (() => void this.load(route)) as EventListener }, this.i18n.t("common.back")) : null,
+        publishButton,
+        resource.can_reject
+          ? element("button", { type: "button", className: "danger-button", onclick: (() => void decide("reject")) as EventListener }, this.i18n.t("packet_editor.reject"))
+          : null,
+      ),
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      capturePage();
+      for (const input of metadata.querySelectorAll<HTMLInputElement>("[data-field]")) {
+        if (modifying && input.disabled) continue;
+        const field = input.dataset.field;
+        if (field === "year") packet.year = input.value ? Number(input.value) : null;
+        else if (field && field !== "themes") (packet[field as "name" | "language" | "lead_author"] as string) = input.value;
+      }
+      try {
+        if (modifying) {
+          const unchanged = Object.keys(changes).some((path) =>
+            JSON.stringify(valueAt(resource.packet, path)) === JSON.stringify(valueAt(packet, path))
+            && fieldAuthors[path] === resource.field_author_ids?.[path]);
+          if (!Object.keys(changes).length || unchanged) {
+            this.showTextDialog(this.i18n.t("packet_management.changes_required"), []);
+            return;
+          }
+          const updated = await this.api.request<TournamentManagerManagementResource>(
+            `${managementPath}/packets/${encodeURIComponent(resource.assignment_id!)}/save`,
+            { method: "POST", body: { expected_version: resource.version, content: packet,
+              changes, field_author_ids: fieldAuthors } },
+          );
+          this.renderManagerManagement(route, { ...updated, kind: "manager_management", state: "ready" });
+          return;
+        }
+        const updated = await this.api.request<PacketDraftResource>(
+          `/api/miniapp/manager/packets/${encodeURIComponent(route.params.launch_ref ?? "")}`,
+          { method: "POST", body: {
+            expected_version: resource.version, content: packet,
+            author_bindings: Object.fromEntries(packetAuthors()
+              .filter((name) => authorBindings.has(name))
+              .map((name) => [name, authorBindings.get(name)])),
+            lead_author_id: leadAuthorId ?? null,
+          } },
+        );
+        this.renderPacketEditor(route, { ...updated, kind: "packet_draft", state: "ready" });
+      } catch (error) {
+        const code = error instanceof ApiError ? error.code : "internal_error";
+        if (code === "stale_write") await this.load(route);
+        else this.showTextDialog(this.i18n.t(`error.${code}`), []);
+      }
+    });
+    form.addEventListener("input", (event) => {
+      if (event.target instanceof HTMLInputElement && event.target.type === "search") return;
+      if (publishButton) publishButton.disabled = true;
+    });
+    if (!modifying) refreshAuthors();
+    renderPage();
+    this.renderFrame(route, form);
+  }
+
+  private renderOngoing(route: RouteMatch, resource: OngoingResource): void {
+    if (resource.state === "empty" || (!resource.lobbies.length && !resource.games.length)) {
+      this.renderFrame(route, this.statusCard("empty", this.i18n.t(route.emptyKey)));
+      return;
+    }
+    let busy = false;
+    const joinLobby = async (lobby: OngoingLobby, role: "player" | "observer"): Promise<void> => {
+      if (busy) return;
+      busy = true;
+      try {
+        await this.api.request("/api/miniapp/ongoing/lobbies/join", {
+          method: "POST",
+          body: { invitation_code: lobby.invitation_code, role },
+          signal: this.request?.signal,
+        });
+        window.location.assign("/auth/bot");
+      } catch (error) {
+        const code = error instanceof ApiError ? error.code : "internal_error";
+        this.showTextDialog(this.i18n.t(`error.${code}`), []);
+      } finally {
+        busy = false;
+      }
+    };
+    const observeGame = async (game: OngoingGame): Promise<void> => {
+      if (busy) return;
+      busy = true;
+      const path = `/api/miniapp/ongoing/games/${encodeURIComponent(game.id)}/observe`;
+      try {
+        let result = await this.api.request<GameObservation>(path, {
+          method: "POST",
+          body: { confirm_fresh: false },
+          signal: this.request?.signal,
+        });
+        if (result.confirmation_required) {
+          if (!window.confirm(this.i18n.t("ongoing.observe_confirm"))) return;
+          result = await this.api.request<GameObservation>(path, {
+            method: "POST",
+            body: { confirm_fresh: true },
+            signal: this.request?.signal,
+          });
+        }
+        if (result.joined) {
+          window.location.assign("/auth/bot");
+        }
+      } catch (error) {
+        const code = error instanceof ApiError ? error.code : "internal_error";
+        this.showTextDialog(this.i18n.t(`error.${code}`), []);
+      } finally {
+        busy = false;
+      }
+    };
+    this.renderOngoingCards(route, resource, joinLobby, observeGame);
+  }
+
+  private renderOngoingCards(
+    route: RouteMatch,
+    resource: OngoingResource,
+    joinLobby: (lobby: OngoingLobby, role: "player" | "observer") => Promise<void>,
+    observeGame: (game: OngoingGame) => Promise<void>,
+  ): void {
+    const lobbyCards = resource.lobbies.map((lobby) => {
+      const players = lobby.members.filter((member) => member.role === "player");
+      const actions = element("div", { className: "lobby-actions" });
+      if (lobby.is_member) {
+        actions.append(element("p", { className: "resource-summary" }, this.i18n.t("ongoing.already_member")));
+      } else if (lobby.viewer_manages) {
+        actions.append(element("p", { className: "resource-summary" }, this.i18n.t("ongoing.managing")));
+      } else {
+        actions.append(
+          element("button", {
+            type: "button",
+            className: "primary-button",
+            onclick: (() => void joinLobby(lobby, "player")) as EventListener,
+          }, this.i18n.t("ongoing.join_player")),
+          element("button", {
+            type: "button",
+            className: "secondary-button",
+            onclick: (() => void joinLobby(lobby, "observer")) as EventListener,
+          }, this.i18n.t("ongoing.join_observer")),
+        );
+      }
+      return element(
+        "article",
+        { className: "resource-card" },
+        element("h2", {}, lobby.tournament_name),
+        element(
+          "p",
+          { className: "tournament-detail" },
+          element("strong", {}, `${this.i18n.t("lobby.capacity")}: `),
+          `${players.length}/${lobby.max_players}`,
+          lobby.searching ? ` · ${this.i18n.t("ongoing.searching")}` : "",
+        ),
+        this.detail(this.i18n.t("ongoing.expires"), dateTimeLocal(lobby.expires_at)),
+        element("h3", {}, this.i18n.t("lobby.members")),
+        element(
+          "ul",
+          { className: "detail-list" },
+          ...lobby.members.map((member) => element(
+            "li",
+            {},
+            `${member.display_name} · ${this.i18n.t(member.role === "observer" ? "lobby.observer" : "lobby.player")} · ${member.ready ? this.i18n.t("lobby.ready") : this.i18n.t("lobby.not_ready")}`,
+          )),
+        ),
+        element("h3", {}, this.i18n.t("lobby.packets")),
+        lobby.selected_packets.length
+          ? element(
+              "ul",
+              { className: "detail-list" },
+              ...lobby.selected_packets.map((packet) => element(
+                "li",
+                {},
+                `${packet.name} · ${this.i18n.t("lobby.packet_fresh")}: ${packet.fresh_play_unit_count}/${packet.total_play_unit_count}`,
+              )),
+            )
+          : element("p", { className: "resource-summary" }, this.i18n.t("lobby.packet_none")),
+        actions,
+      );
+    });
+    this.renderOngoingGameCards(route, resource, lobbyCards, observeGame);
+  }
+
+  private renderOngoingGameCards(
+    route: RouteMatch,
+    resource: OngoingResource,
+    lobbyCards: HTMLElement[],
+    observeGame: (game: OngoingGame) => Promise<void>,
+  ): void {
+    const gameCards = resource.games.map((game) => {
+      const actions = element("div", { className: "lobby-actions" });
+      if (game.observing) {
+        actions.append(element("p", { className: "resource-summary" }, this.i18n.t("ongoing.observing")));
+      } else if (game.can_observe) {
+        actions.append(element("button", {
+          type: "button",
+          className: "primary-button",
+          onclick: (() => void observeGame(game)) as EventListener,
+        }, this.i18n.t("ongoing.observe")));
+      } else {
+        actions.append(element("p", { className: "resource-summary" }, this.i18n.t("ongoing.observe_unavailable")));
+      }
+      return element(
+        "article",
+        { className: "resource-card" },
+        element("h2", {}, game.tournament_name),
+        this.detail(
+          this.i18n.t("ongoing.status"),
+          game.status === "active" ? `${game.status} · ${game.phase}` : game.status,
+        ),
+        element("h3", {}, this.i18n.t("ongoing.participants")),
+        element(
+          "ul",
+          { className: "detail-list" },
+          ...game.participants.map((name) => element("li", {}, name)),
+        ),
+        actions,
+      );
+    });
+    const sections: HTMLElement[] = [];
+    if (lobbyCards.length) {
+      sections.push(
+        element(
+          "section",
+          { className: "route-content" },
+          element("h2", {}, this.i18n.t("ongoing.lobbies")),
+          element("ul", { className: "resource-list" }, ...lobbyCards.map((card) => element("li", {}, card))),
+        ),
+      );
+    }
+    if (gameCards.length) {
+      sections.push(
+        element(
+          "section",
+          { className: "route-content" },
+          element("h2", {}, this.i18n.t("ongoing.games")),
+          element("ul", { className: "resource-list" }, ...gameCards.map((card) => element("li", {}, card))),
+        ),
+      );
+    }
+    this.renderFrame(route, element("section", { className: "route-content" }, ...sections));
+    queueMicrotask(() => document.querySelector<HTMLElement>("#page-title")?.focus());
+  }
+
+  private renderLobby(route: RouteMatch, lobby: LobbyResource): void {
+    if (lobby.game_id) {
+      this.renderFrame(route, this.statusCard("empty", this.i18n.t("lobby.game_assigned")));
+      return;
+    }
+    if (lobby.state === "empty" || lobby.status !== "assembling") {
+      this.renderFrame(route, this.statusCard("empty", this.i18n.t(route.emptyKey)));
+      return;
+    }
+    const can = (action: string): boolean => lobby.available_actions.includes(action);
+    let dirty = false;
+    let busy = false;
+    const section = route.query.get("section") ?? "overview";
+    const mutate = async (command: string, body: Record<string, unknown> = {}): Promise<void> => {
+      if (busy) return;
+      busy = true;
+      try {
+        await this.api.request(
+          `/api/miniapp/lobbies/${encodeURIComponent(route.params.launch_ref ?? "")}/${command}`,
+          { method: "POST", body: { expected_version: lobby.version, ...body } },
+        );
+        if (command === "leave" || command === "cancel") window.location.assign("/auth/bot");
+        else await this.load(route);
+      } catch (error) {
+        const code = error instanceof ApiError ? error.code : "internal_error";
+        if (code === "stale_write") await this.load(route);
+        else {
+          this.showTextDialog(this.i18n.t(`error.${code}`), []);
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    const members = element(
+      "ul", { className: "detail-list" },
+      ...lobby.members.map((member) => element(
+        "li", {}, `${member.display_name} · ${this.i18n.t(member.role === "observer" ? "lobby.observer" : "lobby.player")} · ${member.ready ? this.i18n.t("lobby.ready") : this.i18n.t("lobby.not_ready")}`,
+      )),
+    );
+    const packetFilters = this.lobbyPacketFilters.get(lobby.id) ?? {};
+    this.lobbyPacketFilters.set(lobby.id, packetFilters);
+    const packetList = renderLobbyPackets(lobby, this.i18n, packetFilters, section === "packets", mutate);
+    const descriptors = lobby.setting_descriptors ?? Object.entries(lobby.settings).map(([name, value]) => ({
+      name, value, value_type: typeof value === "boolean" ? "boolean" : typeof value === "number" ? "number" : "string",
+      description_key: name, options: [],
+    }));
+    const editable = descriptors.filter((item) => can("settings_update") && lobby.mutable_parameters.includes(item.name));
+    const editableNames = new Set(editable.map((item) => item.name));
+    const fixed = descriptors.filter((item) => !editableNames.has(item.name));
+    const settings = element("form", { className: "settings-form" });
+    settings.addEventListener("input", () => { dirty = true; });
+    if (editable.length) {
+      settings.append(element("h3", {}, this.i18n.t("lobby.settings_editable")));
+      settings.append(this.renderCategorizedSettings(editable, "setting"));
+      settings.append(element("button", { type: "submit", className: "primary-button" }, this.i18n.t("lobby.settings_save")));
+      settings.addEventListener("submit", (event) => {
+        event.preventDefault();
+        try {
+          const values = this.descriptorValues(settings, editable, "setting");
+          const changes = Object.fromEntries(Object.entries(values).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(lobby.settings[key])));
+          if (Object.keys(changes).length) void mutate("settings", { changes });
+        } catch {
+          this.showTextDialog(this.i18n.t("error.validation_failed"), []);
+        }
+      });
+    }
+    const fixedSettings = fixed.length ? element("div", { className: "resource-card" },
+      element("h3", {}, this.i18n.t("lobby.settings_fixed")),
+      ...fixed.map((item) => this.detail(this.descriptorLabel(item.name, "setting"),
+        item.name === "theme_count" && item.value === "max" ? this.i18n.t("setting.theme_count.max") : typeof item.value === "boolean" ? this.i18n.t(item.value ? "common.enabled" : "common.disabled") : JSON.stringify(item.value)))) : null;
+    const currentSettings = element("div", { className: "resource-card" },
+      ...descriptors.map((item) => this.detail(this.descriptorLabel(item.name, "setting"),
+        item.name === "theme_count" && item.value === "max" ? this.i18n.t("setting.theme_count.max") : typeof item.value === "boolean" ? this.i18n.t(item.value ? "common.enabled" : "common.disabled") : JSON.stringify(item.value))));
+    const tabs = element("nav", { className: "settings-actions", "aria-label": this.i18n.t("lobby.sections") });
+    for (const [value, key] of [["overview", "lobby.overview"], ["packets", "lobby.packets"], ["settings", "lobby.options"]] as const) {
+      const query = new URLSearchParams(route.query);
+      query.set("section", value);
+      tabs.append(element("button", {
+        type: "button", className: section === value ? "primary-button" : "secondary-button",
+        onclick: (() => this.router.navigate(`${route.path}?${query}`)) as EventListener,
+      }, this.i18n.t(key)));
+    }
+    const actions = element("div", { className: "settings-actions" });
+    const action = (capability: string, command: string, key: MessageKey, body: Record<string, unknown> = {}, dangerous = false): void => {
+      if (!can(capability)) return;
+      actions.append(element("button", {
+        type: "button", className: dangerous ? "danger-button" : "primary-button",
+        onclick: (() => {
+          if (!dangerous || window.confirm(this.i18n.t("lobby.confirm"))) void mutate(command, body);
+        }) as EventListener,
+      }, this.i18n.t(key)));
+    };
+    action("ready", "ready", "lobby.action.ready", { ready: true });
+    action("unready", "ready", "lobby.action.unready", { ready: false });
+    action("role_player", "role", "lobby.action.play", { role: "player" });
+    action("role_observer", "role", "lobby.action.observe", { role: "observer", confirm_fresh: true }, true);
+    action("search_start", "search-start", "lobby.action.search_start");
+    action("search_cancel", "search-cancel", "lobby.action.search_cancel");
+    action("start", "start", "lobby.action.start");
+    action("leave", "leave", "lobby.action.leave", {}, true);
+    action("cancel", "cancel", "lobby.action.cancel", {}, true);
+    const violationKeys: Record<string, MessageKey> = {
+      insufficient_fresh_content: "lobby.error.fresh",
+      packet_not_playable: "lobby.error.packet",
+      packet_content_incompatible: "lobby.error.content",
+      ruleset_player_limit_exceeded: "lobby.error.players",
+      tournament_stage_closed: "lobby.error.closed",
+      tournament_capacity_restriction: "lobby.error.players",
+      tournament_packet_limit_exceeded: "lobby.error.packet_count",
+      tournament_membership_required: "lobby.error.membership",
+      classic_participants_required: "classic.participants_required",
+    };
+    const violations = lobby.validation_violations.length
+      ? element("aside", { className: "lobby-warnings", role: "alert" },
+        element("h3", {}, this.i18n.t("lobby.errors")),
+        element("ul", {}, ...lobby.validation_violations.map((item) => {
+          const key = item.code === "packet_not_playable" && item.details?.reason === "missing"
+            ? "lobby.error.packet_required" : violationKeys[item.code];
+          return element("li", {}, key ? this.i18n.t(key)
+            : `${this.i18n.t("lobby.error.other")} (${item.code})`);
+        })))
+      : null;
+    this.renderFrame(route, element(
+      "section", { className: "route-content lobby-content" }, tabs,
+      element("h2", { className: "lobby-tournament-title" }, lobby.tournament_name ?? ""),
+      section === "packets" ? element("section", {}, element("h2", {}, this.i18n.t("lobby.packets")), packetList) :
+      section === "settings" ? element("section", {}, element("h2", {}, this.i18n.t("lobby.options")), settings, fixedSettings) :
+      element("section", { className: "route-content lobby-overview" },
+        lobby.invitation_url ? element("a", { href: lobby.invitation_url, className: "resource-card lobby-invitation-link" },
+          this.i18n.t("lobby.invitation"), ": ", lobby.invitation_url) : this.detail(this.i18n.t("lobby.invitation"), lobby.invitation_code),
+        this.detail(this.i18n.t("lobby.capacity"), `${lobby.members.filter((member) => member.role === "player").length}/${lobby.max_players}`),
+        element("h2", {}, this.i18n.t("lobby.members")), members,
+        element("h2", {}, this.i18n.t("lobby.packets")), packetList,
+        element("h2", {}, this.i18n.t("lobby.options")), currentSettings,
+        actions, violations,
+      ),
+    ));
+    const watchEvents = async (): Promise<void> => {
+      try {
+        const feed = await this.api.request<{ items: Array<{ sequence: number }> }>(
+          `/api/miniapp/lobbies/${encodeURIComponent(route.params.launch_ref ?? "")}/events?after=${lobby.last_event_sequence}`,
+        );
+        if (feed.items.length && !dirty && !busy) {
+          await this.load(route);
+          return;
+        }
+      } catch {
+        // The full snapshot reconciliation below remains authoritative.
+      }
+      this.eventTimer = window.setTimeout(() => void watchEvents(), Math.max(2, lobby.poll_after_seconds) * 1000);
+    };
+    this.eventTimer = window.setTimeout(() => void watchEvents(), Math.max(2, lobby.poll_after_seconds) * 1000);
+    const reconcile = (): void => {
+      if (!dirty && !busy) void this.load(route);
+      else this.pollTimer = window.setTimeout(reconcile, 30_000);
+    };
+    this.pollTimer = window.setTimeout(reconcile, 30_000);
+  }
+
+  private renderTournamentRoute(
+    route: RouteMatch,
+    resource: TournamentRouteResource,
+    page?: RoutePayload["pagination"],
+  ): void {
+    if (resource.state === "empty" || resource.items.length === 0) {
+      this.renderFrame(route, this.statusCard("empty", this.i18n.t(route.emptyKey)));
+      return;
+    }
+    const list = element("ul", { className: "resource-list tournament-list" });
+    for (const item of resource.items) {
+      const badges = element(
+        "div",
+        { className: "tournament-badges" },
+        this.badge(this.i18n.t(`tournament.phase.${item.phase}`),
+          item.phase === "ongoing" ? "success" : item.phase === "future" ? "accent" : "default"),
+        this.badge(this.i18n.t(`tournament.visibility.${item.visibility}`),
+          item.visibility === "private" ? "warning" : "accent"),
+        this.badge(
+          this.i18n.t(
+            item.registration_open
+              ? "tournament.registration.open"
+              : "tournament.registration.closed",
+          ),
+          item.registration_open ? "success" : "default",
+        ),
+      );
+      if (item.membership_status) {
+        const membershipKey = `tournament.membership.${item.membership_status}` as MessageKey;
+        badges.append(this.badge(this.i18n.t(membershipKey), "accent"));
+      }
+      if (item.managed) badges.append(this.badge(this.i18n.t("tournament.managed"), "accent"));
+      if (resource.role === "manager") {
+        badges.append(
+          this.badge(
+            this.i18n.t(
+              item.finalized_at ? "tournament.setup.finalized" : "tournament.setup.unfinalized",
+            ),
+            item.finalized_at ? "accent" : "warning",
+          ),
+        );
+      }
+      const actions = element("div", { className: "tournament-actions" });
+      for (const action of item.available_actions) {
+        if (!isTournamentAction(action)) continue;
+        const button = element(
+          "button",
+          {
+            type: "button",
+            className: action === "register" || action.startsWith("select_") ? "primary-button" : "secondary-button",
+            onclick: ((event: Event) => {
+              const target = event.currentTarget as HTMLButtonElement;
+              void this.handleTournamentAction(route, resource, item, action, target);
+            }) as EventListener,
+          },
+          this.i18n.t(action === "select_manager"
+            ? "website.manage" : `tournament.action.${action}`),
+        );
+        actions.append(button);
+      }
+      list.append(
+        element(
+          "li",
+          {},
+          element(
+            "article",
+            { className: "resource-card tournament-card" },
+            element("div", { className: "tournament-heading" }, element("h2", {}, item.name), element("code", {}, item.slug)),
+            item.description ? element("p", { className: "tournament-description" }, item.description) : null,
+            badges,
+            element(
+              "p",
+              { className: "tournament-summary" },
+              `${item.type_key} · ${item.ruleset_key} · ${this.formatDate(item.starts_at)}`,
+            ),
+            actions,
+          ),
+        ),
+      );
+    }
+    const content = element(
+      "section",
+      { className: "route-content" },
+      element("p", { className: "resource-summary" }, `${resource.items.length} / ${resource.total}`),
+      list,
+    );
+    if (page?.previous || page?.next) content.append(this.pagination(route, page));
+    this.renderFrame(route, content);
+    queueMicrotask(() => document.querySelector<HTMLElement>("#page-title")?.focus());
+  }
+
+  private replaceSection(route: RouteMatch, section: string): void {
+    route.query.set("section", section);
+    window.history.replaceState(window.history.state, "", `${route.path}?${route.query}`);
+  }
+
+  private renderPlayerProfileRoute(route: RouteMatch, resource: PlayerProfileResource): void {
+    const content = renderPlayerProfile(
+      resource,
+      this.i18n,
+      (value) => this.formatDate(value),
+      {
+        section: route.query.get("section") ?? undefined,
+        selectSection: (section) => this.replaceSection(route, section),
+        selectRuleset: (ruleset) =>
+          this.router.navigate(`${route.path}?ruleset=${encodeURIComponent(ruleset)}&section=${route.query.get("section") ?? "general"}`),
+        openPlayer: (playerId) =>
+          this.router.navigate(`/players/${encodeURIComponent(playerId)}`),
+        openGame: (gameId) =>
+          this.router.navigate(
+            `/players/${encodeURIComponent(route.params.player_id ?? "")}/games/${encodeURIComponent(gameId)}`,
+          ),
+      },
+    );
+    this.renderFrame(route, content);
+    queueMicrotask(() => document.querySelector<HTMLElement>("#page-title")?.focus());
+  }
+
+  private renderPlayerGameRoute(route: RouteMatch, resource: PlayerGameResource): void {
+    const content = renderPlayerGame(
+      resource,
+      this.i18n,
+      (value) => this.formatDate(value),
+      {
+        back: () =>
+          this.router.navigate(`/players/${encodeURIComponent(route.params.player_id ?? "")}?section=history`),
+        openPlayer: (playerId) =>
+          this.router.navigate(`/players/${encodeURIComponent(playerId)}`),
+      },
+    );
+    this.renderFrame(route, content);
+    queueMicrotask(() => document.querySelector<HTMLElement>("#page-title")?.focus());
+  }
+
+  private renderManagerManagement(
+    route: RouteMatch,
+    resource: TournamentManagerManagementResource,
+  ): void {
+    const can = (action: string): boolean => resource.available_actions.includes(action);
+    const content = element("div", { className: "management-sections" });
+    const panels = new Map<string, HTMLElement>();
+    const section = (name: string, ...children: Node[]): void => {
+      if (!resource.sections.includes(name as TournamentManagerManagementResource["sections"][number])) return;
+      panels.set(name, element(
+        "section",
+        { className: "management-section", "data-section": name },
+        element("h2", {}, this.i18n.t(`manager_management.${name}` as MessageKey)),
+        ...children,
+      ));
+    };
+
+    const counts = element(
+      "dl",
+      { className: "management-stats" },
+      ...([
+        ["registered_count", resource.registration_count],
+        ["approved_count", resource.approved_count],
+        ["participant_count", resource.participant_count],
+        ["packet_count", resource.packet_count],
+      ] as const).flatMap(([key, value]) => [
+        element("div", { className: "management-stat" },
+          element("dt", {}, this.i18n.t(`manager_management.${key}`)),
+          element("dd", {}, String(value)),
+        ),
+      ]),
+    );
+    const registrationSwitch = element("input", {
+      type: "checkbox",
+      role: "switch",
+      checked: resource.registration_open,
+      disabled: !can("registration_override"),
+    });
+    registrationSwitch.addEventListener("change", () => {
+      void this.mutateManagerManagement(
+        route,
+        "/registration-availability",
+        {
+          expected_version: resource.settings_version,
+          registration_open: (registrationSwitch as HTMLInputElement).checked,
+        },
+      );
+    });
+    const finalized = resource.finalized_at != null;
+    const finished = resource.tournament.status === "completed";
+    const startButton = resource.tournament.type_key === "classic" ? null : element("button", {
+      type: "button", className: "primary-button",
+      disabled: !can("start_tournament"),
+      onclick: (() => void this.mutateManagerManagement(route, "/start", {
+        expected_version: resource.settings_version,
+      })) as EventListener,
+    }, this.i18n.t(resource.tournament.actual_starts_at
+      ? "manager_management.started" : "manager_management.start"));
+    const finalizeButton = element(
+      "button",
+      {
+        type: "button",
+        className: "danger-button",
+        disabled: finalized || !can("finalize"),
+        onclick: (() => {
+          if (window.confirm(this.i18n.t("manager_management.finalize_confirm"))) {
+            void this.mutateManagerManagement(
+              route,
+              "/finalize",
+              { expected_version: resource.settings_version },
+              true,
+            );
+          }
+        }) as EventListener,
+      },
+      this.i18n.t(finalized ? "manager_management.finalized" : "manager_management.finalize"),
+    );
+    const finishButton = element(
+      "button",
+      {
+        type: "button",
+        className: "danger-button",
+        disabled: finished || !can("mark_finished"),
+        onclick: (() => {
+          if (window.confirm(this.i18n.t("manager_management.finish_confirm"))) {
+            void this.mutateManagerManagement(
+              route,
+              "/complete",
+              { expected_version: resource.settings_version },
+            );
+          }
+        }) as EventListener,
+      },
+      this.i18n.t(finished ? "manager_management.finished" : "manager_management.mark_finished"),
+    );
+    section(
+      "general",
+      counts,
+      this.managerNavigationButton(route, "settings"),
+      element(
+        "div",
+        { className: "management-control" },
+        element("label", { className: "switch-label" }, registrationSwitch, element("span", {}, this.i18n.t("manager_management.registration_available"))),
+        element("p", { className: "field-help" }, this.i18n.t("manager_management.registration_manual")),
+        element("p", { className: "field-help" }, this.i18n.t(
+          resource.registration_scheduled_open
+            ? "manager_management.registration_scheduled_open"
+            : "manager_management.registration_scheduled_closed",
+        )),
+      ),
+      element("div", { className: "settings-actions" }, startButton, finalizeButton, finishButton),
+    );
+    if (resource.classic) {
+      for (const kind of ["first", "playoff"] as const) {
+        const stage = resource.classic.stages.find((s) => s.kind === kind);
+        panels.get("general")?.append(element("button", {
+          type: "button", className: "primary-button",
+          disabled: !finalized || finished || !stage || stage.stage_type === "none" || !!stage.started_at,
+          onclick: (() => void this.mutateClassic(route, resource.settings_version, "start", kind, {})) as EventListener,
+        }, this.i18n.t(kind === "first" ? "classic.start_first" : "classic.start_playoff")));
+        section(kind === "first" ? "first_stage" : "playoff_stage",
+          this.classicRounds(route, resource, stage));
+      }
+      section("first_round_seeding", this.classicSeeding(route, resource));
+    }
+
+    const registrationList = resource.registrations.length
+      ? element(
+          "ul",
+          { className: "resource-list registration-list" },
+          ...resource.registrations.map((registration) => {
+            const actions = element("div", { className: "inline-actions" });
+            for (const decision of registration.available_actions) {
+              actions.append(element(
+                "button",
+                {
+                  type: "button",
+                  className: decision === "reject" ? "danger-button compact-button" : "primary-button compact-button",
+                  onclick: (() => void this.mutateManagerManagement(
+                    route,
+                    `/registrations/${encodeURIComponent(registration.player_id)}`,
+                    { decision },
+                  )) as EventListener,
+                },
+                this.i18n.t(`manager_management.${decision}`),
+              ));
+            }
+            return element(
+              "li",
+              {},
+              element(
+                "article",
+                { className: "resource-card registration-card" },
+                element("div", {}, element("strong", {}, registration.display_name),
+                  registration.real_name && registration.real_name !== registration.display_name
+                    ? element("p", { className: "field-help" }, registration.real_name)
+                    : null,
+                  element("p", { className: "field-help" }, this.formatDate(registration.registered_at)),
+                ),
+                this.badge(this.i18n.t(`tournament.membership.${registration.status}` as MessageKey)),
+                actions,
+              ),
+            );
+          }),
+        )
+      : this.statusCard("empty", this.i18n.t("manager_management.registrations_empty"));
+    section("registrations", registrationList);
+
+    const packetAccessibility = element("div", { className: "packet-accessibility" });
+    if (!resource.packets.length) {
+      packetAccessibility.append(this.statusCard("empty", this.i18n.t("manager_management.packets_empty")));
+    } else {
+      const picker = element(
+        "select",
+        { "aria-label": this.i18n.t("manager_management.packet_select") },
+        ...resource.packets.map((packet) => element(
+          "option",
+          { value: packet.assignment_id },
+          packet.version ? `${packet.name} · v${packet.version}` : packet.name,
+        )),
+      );
+      const tableContainer = element("div", { className: "packet-access-table-wrap" });
+      const renderPacket = (packet: ManagementPacket): void => {
+        replaceChildren(tableContainer, this.packetAccessTable(route, packet, can("packet_access"), resource.tournament.type_key === "classic"));
+      };
+      picker.addEventListener("change", () => {
+        const selected = resource.packets.find((packet) => packet.assignment_id === picker.value);
+        if (selected) renderPacket(selected);
+      });
+      packetAccessibility.append(
+        element("label", { className: "packet-picker-label" }, this.i18n.t("manager_management.packet_select"), picker),
+        tableContainer,
+        element("p", { className: "field-help" }, this.i18n.t("manager_management.readable_help")),
+      );
+      renderPacket(resource.packets[0]!);
+    }
+    section("packet_accessibility", packetAccessibility);
+    if (resource.tournament.type_key === "ladder" && resource.subscriptions) {
+      section("subscriptions", renderSubscriptions(resource.subscriptions, can("subscriptions"), this.i18n,
+        (command, values) => this.mutateManagerManagement(route, "/subscriptions", {
+          expected_version: resource.settings_version, command, values,
+        }), this.subscriptionPlayer, (id) => { this.subscriptionPlayer = id; }));
+    }
+    const managedPackets = element("div", { className: "lobby-packets" });
+    if (can("packet_management")) managedPackets.append(element("button", {
+      type: "button", className: "primary-button",
+      onclick: (() => this.showExistingPacketDialog(route)) as EventListener,
+    }, this.i18n.t("packet_management.add_existing")));
+    for (const packet of resource.packets) {
+      const card = element("article", { className: "resource-card lobby-packet-card", "data-packet-id": packet.packet_id },
+        element("h3", {}, packet.name),
+        element("dl", { className: "lobby-packet-details" },
+          ...([
+            ["packet_management.packet_id", packet.packet_id],
+            ["packet_management.packet_version_id", packet.packet_version_id ?? "—"],
+            ["lobby.packet_year", packet.year?.toString() ?? "—"],
+            ["lobby.packet_publication_year", packet.published_at?.slice(0, 4) || "—"],
+            ["lobby.packet_lead_author", packet.lead_author || "—"],
+            ["lobby.packet_authors", packet.authors?.join(", ") || "—"],
+          ] as const).map(([key, value]) => element("div", { className: "lobby-packet-detail" },
+            element("dt", {}, this.i18n.t(key)), element("dd", {}, value))),
+        ),
+      );
+      const actions = element("div", { className: "inline-actions" });
+      const viewingRule = element("select", { disabled: !can("packet_access"),
+        "aria-label": this.i18n.t("packet_management.library_viewing_rule") },
+        ...(["never", "after-play", "anytime"] as const).map((rule) => element("option", {
+          value: rule, selected: rule === (packet.library_viewing_rule ?? "never"),
+        }, this.i18n.t(`packet_management.library_viewing_rule.${rule}`))));
+      viewingRule.addEventListener("change", () => void this.mutateManagerManagement(route, "/packet-access", {
+        assignment_id: packet.assignment_id, right: "library_viewing_rule",
+        library_viewing_rule: viewingRule.value, expected_version: resource.settings_version,
+      }));
+      card.append(element("label", { className: "packet-viewing-rule" },
+        this.i18n.t("packet_management.library_viewing_rule"), viewingRule),
+        element("p", { className: "field-help" }, this.i18n.t("packet_management.library_viewing_help")));
+      if (can("packet_management")) for (const command of ["modify", "release", "delete"] as const) {
+        const button = element("button", {
+          type: "button", className: command === "delete" ? "danger-button" : "secondary-button",
+          disabled: command === "release" && packet.released,
+        }, this.i18n.t(packet.released && command === "release" ? "packet_management.released" : `packet_management.${command}`));
+        button.addEventListener("click", async () => {
+          if (command === "delete" && !window.confirm(this.i18n.t("packet_management.delete_confirm"))) return;
+          if (command === "release" && !window.confirm(this.i18n.t("packet_management.release_confirm"))) return;
+          const path = `/api/miniapp/manager/tournaments/${encodeURIComponent(route.params.launch_ref ?? "")}/packets/${encodeURIComponent(packet.assignment_id)}`;
+          button.disabled = true;
+          try {
+            if (command === "modify") {
+              const editor = await this.api.request<PacketDraftResource>(path);
+              this.renderPacketEditor(route, editor);
+            } else {
+              const updated = await this.api.request<TournamentManagerManagementResource>(`${path}/${command}`, {
+                method: "POST", body: { expected_version: packet.version },
+              });
+              this.renderManagerManagement(route, { ...updated, kind: "manager_management", state: "ready" });
+            }
+          } catch (error) {
+            const code = error instanceof ApiError ? error.code : "internal_error";
+            if (code === "stale_write") await this.load(route);
+            else this.showTextDialog(this.i18n.t(`error.${code}`), []);
+          } finally { button.disabled = false; }
+        });
+        actions.append(button);
+      }
+      card.append(actions);
+      managedPackets.append(card);
+    }
+    if (!resource.packets.length) managedPackets.append(this.statusCard("empty", this.i18n.t("manager_management.packets_empty")));
+    section("packet_management", managedPackets);
+
+    const sectionNavigation = element(
+      "nav",
+      {
+        className: "management-section-nav",
+        "aria-label": this.i18n.t("route.manager_management.title"),
+      },
+    );
+    const sectionContainer = element("div", { className: "management-section-container" });
+    const navigationButtons = new Map<string, HTMLButtonElement>();
+    const showSection = (
+      name: TournamentManagerManagementResource["sections"][number],
+    ): void => {
+      const panel = panels.get(name);
+      if (!panel) return;
+      this.managerSection = { tournamentRef: route.params.launch_ref, name };
+      replaceChildren(sectionContainer, panel);
+      for (const [sectionName, button] of navigationButtons) {
+        const active = sectionName === name;
+        button.classList.toggle("active", active);
+        if (active) button.setAttribute("aria-current", "page");
+        else button.removeAttribute("aria-current");
+      }
+    };
+    for (const name of resource.sections) {
+      if (!panels.has(name)) continue;
+      const button = element(
+        "button",
+        {
+          type: "button",
+          onclick: (() => showSection(name)) as EventListener,
+        },
+        this.i18n.t(`manager_management.${name}`),
+      );
+      navigationButtons.set(name, button);
+      sectionNavigation.append(button);
+    }
+    const savedSection = this.managerSection;
+    const previousSection = savedSection && savedSection.tournamentRef === route.params.launch_ref
+      ? savedSection.name
+      : undefined;
+    const initialSection = previousSection && panels.has(previousSection)
+      ? previousSection
+      : resource.sections.find((name) => panels.has(name));
+    if (initialSection) showSection(initialSection);
+    content.append(sectionNavigation, sectionContainer);
+    this.renderFrame(route, content);
+    queueMicrotask(() => document.querySelector<HTMLElement>("#page-title")?.focus());
+  }
+
+  private packetAccessTable(
+    route: RouteMatch,
+    packet: ManagementPacket,
+    enabled: boolean,
+    classic = false,
+  ): HTMLElement {
+    const rights: Array<"playable" | "discoverable" | "readable"> = classic ? ["readable"] : ["playable", "discoverable", "readable"];
+    const table = element("table", { className: "packet-access-table" });
+    const head = element("thead", {}, element(
+      "tr",
+      {},
+      element("th", { scope: "col" }, ""),
+      ...rights.map((right) => element("th", { scope: "col" }, this.i18n.t(`manager_management.${right}`))),
+    ));
+    const body = element("tbody");
+    const accessCheckbox = (
+      right: typeof rights[number],
+      checked: boolean,
+      playerId?: string,
+      indeterminate = false,
+    ): HTMLInputElement => {
+      const checkbox = element("input", {
+        type: "checkbox",
+        checked,
+        disabled: !enabled,
+        "aria-label": this.i18n.t(`manager_management.${right}`),
+      });
+      checkbox.indeterminate = indeterminate;
+      checkbox.addEventListener("change", () => void this.mutateManagerManagement(
+        route,
+        "/packet-access",
+        {
+          assignment_id: packet.assignment_id,
+          player_id: playerId ?? null,
+          right,
+          enabled: checkbox.checked,
+        },
+      ));
+      return checkbox;
+    };
+    body.append(element(
+      "tr",
+      { className: "set-all-row" },
+      element("th", { scope: "row" }, this.i18n.t("manager_management.set_for_all")),
+      ...rights.map((right) => {
+        const selected = packet.player_access.filter((player) => player[right]).length;
+        return element("td", {}, accessCheckbox(
+          right,
+          packet.player_access.length > 0
+            ? selected === packet.player_access.length
+            : packet.default_access?.[right] ?? false,
+          undefined,
+          selected > 0 && selected < packet.player_access.length,
+        ));
+      }),
+    ));
+    for (const player of packet.player_access) {
+      body.append(element(
+        "tr",
+        {},
+        element("th", { scope: "row" }, player.display_name),
+        ...rights.map((right) => element("td", {}, accessCheckbox(right, player[right], player.player_id))),
+      ));
+    }
+    if (!packet.player_access.length) {
+      body.append(element("tr", {}, element("td", { colspan: String(rights.length + 1), className: "empty-table-cell" }, this.i18n.t("manager_management.players_empty"))));
+    }
+    table.append(head, body);
+    return table;
+  }
+
+  private subscriptionPlayer = "";
+
+  private async mutateManagerManagement(
+    route: RouteMatch,
+    suffix: string,
+    body: Record<string, unknown>,
+    reload = false,
+  ): Promise<void> {
+    try {
+      const response = await this.api.request<TournamentManagerManagementResource>(
+        `/api/miniapp/manager/tournaments/${encodeURIComponent(route.params.launch_ref ?? "")}${suffix}`,
+        { method: "POST", body },
+      );
+      if (reload) await this.load(route);
+      else this.renderManagerManagement(route, { ...response, kind: "manager_management", state: "ready" });
+    } catch (error) {
+      const code = error instanceof ApiError ? error.code : "internal_error";
+      if (code === "stale_write") await this.load(route);
+      else {
+        await this.load(route);
+        this.showTextDialog(this.i18n.t(`error.${code}`), []);
+      }
+    }
+  }
+
+  private renderManagerSettings(
+    route: RouteMatch,
+    resource: TournamentManagerSettingsResource,
+  ): void {
+    const item = resource.tournament;
+    const canChangeCompetition = resource.available_actions.includes("update_competition");
+    const inferredType = (value: unknown): ManagerSettingDescriptor["value_type"] =>
+      Array.isArray(value) ? "array" : typeof value === "boolean" ? "boolean" : Number.isInteger(value) ? "integer" : typeof value === "number" ? "number" : "string";
+    const settingDescriptors = resource.setting_descriptors ?? Object.entries(resource.default_parameters).map(([name, value]) => ({
+      name, value, value_type: inferredType(value), description_key: `ruleset.${item.ruleset_key}.${name}.description`, options: [],
+    }));
+    const policyDescriptors = resource.policy_descriptors ?? Object.entries(resource.policies).filter(([name]) => name !== "ruleset_rating_weight").map(([name, value]) => ({
+      name, value, value_type: inferredType(value), description_key: `policy.${name}.description`, options: [],
+    }));
+    const form = element("form", { className: "settings-form" });
+    const input = (
+      label: MessageKey,
+      name: string,
+      value: string,
+      type = "text",
+      disabled = false,
+    ): HTMLElement => element(
+      "label",
+      {},
+      this.i18n.t(label),
+      element("input", { name, type, value, disabled }),
+    );
+    const select = (
+      label: MessageKey,
+      name: string,
+      values: string[],
+      value: string,
+      disabled = false,
+    ): HTMLElement => element(
+      "label",
+      {},
+      this.i18n.t(label),
+      element(
+        "select",
+        { name, disabled },
+        ...values.map((option) => element("option", { value: option, selected: option === value }, option)),
+      ),
+    );
+    const group = (legend: MessageKey, ...children: Node[]): HTMLElement => element(
+      "fieldset", {}, element("legend", {}, this.i18n.t(legend)), ...children,
+    );
+
+    const authors = element("div", { className: "repeating-list", id: "selected-authors" });
+    const appendAuthor = (id: string, displayName: string): void => {
+      if (Array.from(authors.querySelectorAll<HTMLElement>("[data-author-id]")).some(
+        (row) => row.dataset.authorId === id,
+      )) return;
+      const row = element(
+        "div",
+        { className: "repeating-row", "data-author-id": id },
+        element("input", { type: "hidden", name: "author_ids", value: id }),
+        element("span", {}, displayName),
+        element(
+          "button",
+          { type: "button", className: "secondary-button" },
+          this.i18n.t("common.remove"),
+        ),
+      );
+      row.querySelector("button")?.addEventListener("click", () => row.remove());
+      authors.append(row);
+    };
+    for (const author of resource.authors ?? []) appendAuthor(author.id, author.display_name);
+
+    const authorSearch = element("input", {
+      type: "search",
+      placeholder: this.i18n.t("manager_settings.author_search_placeholder"),
+      "aria-label": this.i18n.t("manager_settings.author_search"),
+    });
+    const authorResults = element("select", {
+      "aria-label": this.i18n.t("manager_settings.author_results"),
+    });
+    let authorSearchTimer: number | undefined;
+    authorSearch.addEventListener("input", () => {
+      if (authorSearchTimer !== undefined) window.clearTimeout(authorSearchTimer);
+      authorSearchTimer = window.setTimeout(async () => {
+        try {
+          const result = await this.api.request<{
+            items: Array<{ author_id: string; display_name: string }>;
+          }>(
+            `/api/miniapp/manager/tournaments/${encodeURIComponent(route.params.launch_ref ?? "")}/authors?query=${encodeURIComponent(authorSearch.value)}`,
+          );
+          replaceChildren(
+            authorResults,
+            ...result.items.map((author) => element(
+              "option",
+              { value: author.author_id },
+              author.display_name,
+            )),
+          );
+        } catch (error) {
+        }
+      }, 200);
+    });
+    const addExistingAuthor = element(
+      "button",
+      { type: "button", className: "secondary-button" },
+      this.i18n.t("manager_settings.author_add"),
+    );
+    addExistingAuthor.addEventListener("click", () => {
+      const option = authorResults.selectedOptions[0];
+      if (option) appendAuthor(option.value, option.textContent ?? option.value);
+    });
+    const addNewAuthor = element(
+      "button",
+      { type: "button", className: "secondary-button" },
+      this.i18n.t("manager_settings.author_add_new"),
+    );
+    addNewAuthor.addEventListener("click", () => this.showNewAuthorDialog(route));
+
+    const pricingPlans = element("div", { className: "repeating-list", id: "pricing-plans" });
+    const appendPricingPlan = (
+      name = "",
+      prices: Array<{ amount: number | string; currency: string }> = [{ amount: "", currency: "" }],
+    ): void => {
+      const priceList = element("div", { className: "pricing-price-list" });
+      const appendPrice = (amount: number | string = "", currency = ""): void => {
+        const row = element(
+          "div",
+          { className: "pricing-price-row" },
+          element("input", { name: "pricing_amount", type: "number", min: "1", step: "1", value: String(amount), placeholder: this.i18n.t("manager_settings.pricing_amount") }),
+          element("input", { name: "pricing_currency", value: currency, maxlength: "3", placeholder: this.i18n.t("manager_settings.pricing_currency") }),
+          element("button", { type: "button", className: "secondary-button" }, this.i18n.t("common.remove")),
+        );
+        row.querySelector("button")?.addEventListener("click", () => row.remove());
+        priceList.append(row);
+      };
+      for (const price of prices.length ? prices : [{ amount: "", currency: "" }]) {
+        appendPrice(price.amount, price.currency);
+      }
+      const addPrice = element("button", { type: "button", className: "secondary-button" }, this.i18n.t("manager_settings.pricing_add_price"));
+      addPrice.addEventListener("click", () => appendPrice());
+      const plan = element(
+        "section",
+        { className: "pricing-plan", "data-pricing-plan": "" },
+        element("input", { name: "pricing_name", value: name, placeholder: this.i18n.t("manager_settings.pricing_name") }),
+        priceList,
+        element(
+          "div",
+          { className: "inline-actions" },
+          addPrice,
+          element("button", { type: "button", className: "secondary-button remove-pricing-plan" }, this.i18n.t("common.remove")),
+        ),
+      );
+      plan.querySelector<HTMLButtonElement>(".remove-pricing-plan")?.addEventListener("click", () => plan.remove());
+      pricingPlans.append(plan);
+    };
+    for (const plan of item.pricing_plans) appendPricingPlan(plan.name, plan.prices);
+    const addPricing = element("button", { type: "button", className: "secondary-button" }, this.i18n.t("manager_settings.pricing_add"));
+    addPricing.addEventListener("click", () => appendPricingPlan());
+
+    const mutable = element("div", { className: "checkbox-grid" }, ...settingDescriptors.map((descriptor) => element(
+      "label",
+      { className: "checkbox-label" },
+      element("input", { type: "checkbox", name: "player_mutable_parameters", value: descriptor.name, checked: resource.player_mutable_parameters.includes(descriptor.name) }),
+      this.descriptorLabel(descriptor.name, "setting"),
+    )));
+
+    const requirements = element("div", { className: "repeating-list" });
+    const appendRequirement = (kind = "has-played-tournament", target = "", message = "", name = ""): void => {
+      const row = element("div", { className: "repeating-row", "data-requirement": "true" },
+        element("label", {}, this.i18n.t("manager_settings.requirement_kind"),
+          element("select", { name: "requirement_kind" },
+            ...["has-played-tournament", "has-not-played-tournament", "has-not-seen-packet"].map((value) =>
+              element("option", { value, selected: value === kind }, this.i18n.t(`requirement.${value}` as MessageKey))))),
+        input("manager_settings.requirement_target", "requirement_target", target),
+        ...(name ? [element("span", {}, name)] : []),
+        input("manager_settings.requirement_message", "requirement_message", message),
+        element("button", { type: "button", className: "secondary-button" }, this.i18n.t("common.remove")),
+      );
+      const targetInput = row.querySelector<HTMLInputElement>('input[name="requirement_target"]')!;
+      targetInput.required = true;
+      targetInput.pattern = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+      row.querySelector<HTMLInputElement>('input[name="requirement_message"]')!.maxLength = 500;
+      row.querySelector("button")!.addEventListener("click", () => row.remove());
+      requirements.append(row);
+    };
+    for (const requirement of resource.registration_requirements ?? []) {
+      appendRequirement(requirement.kind, requirement.target_id, requirement.failure_message ?? "", requirement.target_name);
+    }
+    const addRequirement = element("button", { type: "button", className: "secondary-button" }, this.i18n.t("manager_settings.requirement_add"));
+    addRequirement.addEventListener("click", () => appendRequirement());
+
+    form.append(
+      this.managerNavigationButton(route, "management"),
+      ...(resource.classic ? [this.classicSettings(route, resource.settings_version, resource.classic)] : []),
+      element(
+        "p",
+        { className: "setup-state" },
+        this.i18n.t(resource.finalized_at ? "manager_settings.finalized" : "manager_settings.unfinalized"),
+      ),
+      group(
+        "manager_settings.metadata",
+        input("manager_settings.name", "name", item.name),
+        input("tournament.slug", "slug", item.slug),
+        select("tournament.visibility", "visibility", ["private", "public"], item.visibility),
+        input("tournament.language", "language", item.language),
+        element("label", {}, this.i18n.t("manager_settings.description"), element("textarea", { name: "description", rows: "3" }, item.description ?? "")),
+        element("label", {}, this.i18n.t("manager_settings.organizer_contacts"), element("textarea", { name: "organizer_contacts", rows: "3" }, resource.organizer_contacts ?? "")),
+        input("manager_settings.channel", "channel", resource.channel ?? ""),
+        element("h3", {}, this.i18n.t("tournament.authors")),
+        authors,
+        authorSearch,
+        authorResults,
+        element("div", { className: "inline-actions" }, addExistingAuthor, addNewAuthor),
+      ),
+      group(
+        "manager_settings.competition",
+        select("tournament.type", "type_key", resource.type_options, item.type_key, !canChangeCompetition),
+        select("tournament.ruleset", "game_ruleset_key", resource.ruleset_options, item.ruleset_key, !canChangeCompetition),
+        !canChangeCompetition
+          ? element("p", { className: "field-help" }, this.i18n.t("manager_settings.competition_locked"))
+          : element("p", { className: "field-help" }, this.i18n.t("manager_settings.competition_editable")),
+      ),
+      group(
+        "manager_settings.pricing",
+        select("tournament.payment", "payment_type", ["free", "one-time", "per-stage"], item.payment_type),
+        pricingPlans,
+        addPricing,
+      ),
+      group(
+        "manager_settings.registration",
+        element("label", { className: "checkbox-label" }, element("input", {
+          name: "registration_open", type: "checkbox", checked: resource.registration_enabled,
+        }), this.i18n.t("manager_settings.registration_enabled")),
+        element("p", { className: "field-help" }, this.i18n.t("manager_settings.registration_help")),
+        input("tournament.registration_starts", "registration_starts_at", dateTimeLocal(item.registration_starts_at), "datetime-local"),
+        input("tournament.registration_ends", "registration_ends_at", dateTimeLocal(item.registration_ends_at), "datetime-local"),
+        element("label", { className: "checkbox-label" }, element("input", {
+          name: "ignore_late_registrations", type: "checkbox", checked: resource.ignore_late_registrations,
+        }), this.i18n.t("manager_settings.ignore_late_registrations")),
+        input("tournament.starts", "starts_at", dateTimeLocal(item.starts_at), "datetime-local"),
+        input("tournament.ends", "planned_ends_at", dateTimeLocal(item.planned_ends_at), "datetime-local"),
+        element("p", { className: "field-help" }, this.i18n.t("manager_settings.schedule_help")),
+      ),
+      group(
+        "tournament.requirements",
+        element("p", { className: "field-help" }, this.i18n.t("manager_settings.requirement_help")),
+        requirements,
+        addRequirement,
+      ),
+      group(
+        "manager_settings.gameplay",
+        element("h3", {}, this.i18n.t("tournament.defaults")),
+        ...(item.type_key === "classic"
+          ? [element("p", { className: "field-help" }, this.i18n.t("classic.full_packet"))] : []),
+        this.renderCategorizedSettings(settingDescriptors, "setting"),
+        element("h3", {}, this.i18n.t("tournament.mutable")),
+        mutable,
+        element("h3", {}, this.i18n.t("tournament.policies")),
+        this.renderDescriptorGroup(policyDescriptors, "policy"),
+      ),
+      element(
+        "div",
+        { className: "settings-actions" },
+        element("button", { type: "submit", className: "primary-button" }, this.i18n.t("manager_settings.save")),
+        resource.available_actions.includes("finalize")
+          ? element(
+              "button",
+              {
+                type: "button",
+                className: "danger-button",
+                onclick: (() => void this.finalizeTournament(route, resource)) as EventListener,
+              },
+              this.i18n.t("manager_settings.finalize"),
+            )
+          : null,
+      ),
+    );
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void this.saveManagerSettings(route, resource, form);
+    });
+    this.renderFrame(route, form);
+  }
+
+  private async mutateClassic(route: RouteMatch, version: number, command: string,
+    kind: string, values: Record<string, unknown>): Promise<void> {
+    const controls = Array.from(this.root.querySelectorAll<HTMLButtonElement>("button"));
+    controls.forEach((button) => { button.disabled = true; });
+    try {
+      await this.api.request(`/api/miniapp/manager/tournaments/${encodeURIComponent(route.params.launch_ref ?? "")}/classic`, {
+        method: "POST", body: { expected_version: version, command, kind, values },
+      });
+      await this.load(route);
+    } catch (error) {
+      await this.load(route);
+      this.showTextDialog(this.i18n.t(`error.${error instanceof ApiError ? error.code : "internal_error"}`), []);
+    }
+  }
+
+  private classicSettings(route: RouteMatch, version: number, classic: ClassicTournament): HTMLElement {
+    const container = element("div", { className: "classic-settings" });
+    for (const kind of ["first", "playoff"] as const) {
+      const stage = classic.stages.find((s) => s.kind === kind);
+      const locked = !!stage?.started_at || (kind === "first" && classic.stages.some((s) => s.kind === "playoff" && s.started_at));
+      const type = element("select", {}, ...(
+        kind === "first" ? ["none", "groups", "quiz", "swiss"] : ["none", "playoff"]
+      ).map((value) => element("option", { value, selected: value === (stage?.stage_type ?? "none") },
+        this.i18n.t(`classic.${value}` as MessageKey))));
+      const scheme = element("select", {});
+      const rounds = element("input", { type: "number", min: "1", step: "1", value: String(stage?.round_count ?? 6) });
+      const gameSize = element("input", { type: "number", min: "2", max: "12", step: "1", value: String(stage?.players_per_game ?? 4) });
+      const swissFields = element("div", {},
+        element("label", {}, this.i18n.t("classic.rounds"), rounds),
+        element("label", {}, this.i18n.t("classic.players_per_game"), gameSize));
+      const refresh = (): void => {
+        replaceChildren(scheme, ...classic.schemes.filter((s) => s.kind === type.value).map((s) =>
+          element("option", { value: s.id, selected: s.id === stage?.scheme_key },
+            `${s.id} · ${s.size} ${this.i18n.t("classic.players")} · ${s.round_count} ${this.i18n.t("classic.rounds")}`)));
+        scheme.disabled = locked || !["groups", "playoff"].includes(type.value);
+        swissFields.hidden = type.value !== "swiss";
+      };
+      type.addEventListener("change", refresh);
+      refresh();
+      const points = element("input", { value: (stage?.place_points ?? ["4", "3", "2", "1"]).join(", ") });
+      const multiplier = element("input", { type: "number", step: "any", value: stage?.score_multiplier ?? "0.02" });
+      container.append(element("fieldset", { disabled: locked },
+        element("legend", {}, this.i18n.t(kind === "first" ? "manager_management.first_stage" : "manager_management.playoff_stage")),
+        element("label", {}, this.i18n.t("classic.type"), type),
+        element("label", {}, this.i18n.t("classic.scheme"), scheme),
+        kind === "first" ? swissFields : null,
+        kind === "first" ? element("label", {}, this.i18n.t("classic.points"), points) : null,
+        kind === "first" ? element("label", {}, this.i18n.t("classic.multiplier"), multiplier) : null,
+        element("button", { type: "button", className: "primary-button", onclick: (() => void this.mutateClassic(route, version, "configure", kind, {
+          stage_type: type.value, scheme_key: scheme.value || null,
+          ...(type.value === "swiss" ? { round_count: Number(rounds.value), players_per_game: Number(gameSize.value) } : {}),
+          ...(kind === "first" ? {
+            place_points: points.value.split(",").map((p) => p.trim()), score_multiplier: multiplier.value,
+          } : {}),
+        })) as EventListener }, this.i18n.t("classic.save_stage")),
+        locked ? element("p", {}, this.i18n.t("classic.locked")) : null,
+      ));
+    }
+    return container;
+  }
+
+  private classicRounds(route: RouteMatch, resource: TournamentManagerManagementResource, stage?: ClassicStage): HTMLElement {
+    const container = element("div", { className: "classic-rounds" });
+    const names = new Map(resource.classic?.players.map((p) => [p.id, p.name]));
+    if (!stage || stage.stage_type === "none") {
+      container.append(element("p", {}, this.i18n.t("classic.configure_first")));
+      return container;
+    }
+    const stageStarted = !!stage.started_at;
+    if (!stageStarted) container.append(element("p", { className: "packet-warnings", role: "status" },
+      this.i18n.t("classic.packet_access_requires_start")));
+    for (const round of stage.rounds) {
+      const packet = element("select", {}, element("option", { value: "" }, "—"),
+        ...resource.packets.map((p) => element("option", { value: p.assignment_id, selected: p.assignment_id === round.assignment_id }, p.name)));
+      packet.disabled = round.packet_locked;
+      const discoverable = element("input", { type: "checkbox", role: "switch", checked: round.discoverable, disabled: !stageStarted });
+      const playable = element("input", { type: "checkbox", role: "switch", checked: round.playable, disabled: !stageStarted });
+      const accessChanges: Record<string, boolean> = {};
+      discoverable.addEventListener("change", () => { accessChanges.discoverable = discoverable.checked; });
+      playable.addEventListener("change", () => { accessChanges.playable = playable.checked; });
+      const deadline = element("input", { type: "datetime-local", value: dateTimeLocal(round.start_deadline) });
+      container.append(element("article", { className: "resource-card" },
+        element("h3", {}, `${this.i18n.t("classic.round")} ${round.number}`),
+        element("label", {}, this.i18n.t("manager_management.packet_select"), packet),
+        element("label", { className: "switch-label" }, discoverable, this.i18n.t("manager_management.discoverable")),
+        element("label", { className: "switch-label" }, playable, this.i18n.t("manager_management.playable")),
+        element("label", {}, this.i18n.t("classic.deadline"), deadline),
+        element("p", { className: "field-help" }, this.i18n.t("classic.deadline_help")),
+        element("button", { type: "button", className: "primary-button", disabled: resource.tournament.status !== "active",
+          onclick: (() => void this.mutateClassic(route, resource.settings_version, "round", stage.kind, {
+            round_id: round.id, assignment_id: packet.value || null,
+            ...(stageStarted ? accessChanges : {}),
+            start_deadline: deadline.value ? new Date(deadline.value).toISOString() : null,
+          })) as EventListener }, this.i18n.t("classic.save_round")),
+        element("button", { type: "button", className: "secondary-button", disabled: resource.tournament.status !== "active",
+          onclick: (() => void this.mutateClassic(route, resource.settings_version, "round", stage.kind, {
+            round_id: round.id, assignment_id: packet.value || null, discoverable: null, playable: null,
+            start_deadline: deadline.value ? new Date(deadline.value).toISOString() : null,
+          })) as EventListener }, this.i18n.t("classic.use_packet_defaults")),
+        ...round.matches.map((m) => {
+          const results = m.results?.map((r) => `${r.place}. ${r.seat.startsWith("chair:") ? this.i18n.t("classic.chair") : names.get(r.seat) ?? r.seat} (${r.score})`).join("; ");
+          return element("p", {},
+            `${this.i18n.t("classic.group")} ${m.group} · ${this.i18n.t("classic.game")} ${m.number}: ${results || m.players.join(", ") || this.i18n.t("classic.awaiting_results")} · ${this.i18n.t(m.randomized ? "classic.randomized" : m.results ? "classic.completed" : m.game_id ? "classic.running" : "classic.pending")}`);
+        }),
+      ));
+    }
+    if (stage.standings.length) container.append(element("table", {},
+      element("thead", {}, element("tr", {}, ...["classic.players", ...(stage.stage_type === "quiz" ? [] : ["classic.total_points"]), "classic.score", ...(stage.stage_type === "swiss" ? ["classic.opponent_place_sum"] : [])].map((k) => element("th", {}, this.i18n.t(k as MessageKey))))),
+      element("tbody", {}, ...stage.standings.map((row) => element("tr", {}, element("td", {}, row.name), stage.stage_type === "quiz" ? null : element("td", {}, row.points), element("td", {}, row.score), stage.stage_type === "swiss" ? element("td", {}, row.opponent_place_sum ?? "—") : null)))));
+    return container;
+  }
+
+  private classicSeeding(route: RouteMatch, resource: TournamentManagerManagementResource): HTMLElement {
+    return renderClassicSeeding(resource.classic!, resource.tournament.status === "active", this.i18n,
+      (stage, values) => void this.mutateClassic(route, resource.settings_version, "seed", stage.kind, values));
+  }
+
+  private managerNavigationButton(route: RouteMatch, view: "settings" | "management"): HTMLButtonElement {
+    return element("button", {
+      type: "button",
+      className: "secondary-button",
+      onclick: (() => this.router.navigate(
+        `/manager/tournaments/${encodeURIComponent(route.params.launch_ref ?? "")}/${view}`,
+      )) as EventListener,
+    }, this.i18n.t(view === "settings" ? "route.manager_settings.title" : "route.manager_management.title"));
+  }
+
+  private renderDescriptorGroup(
+    descriptors: TournamentManagerSettingsResource["setting_descriptors"],
+    prefix: "setting" | "policy",
+  ): HTMLElement {
+    const wrapper = element("div", { className: "descriptor-editor" });
+    const multiple = descriptors.length > 1;
+    const picker = element("select", { "aria-label": this.i18n.t(prefix === "setting" ? "manager_settings.setting_select" : "manager_settings.policy_select") });
+    const panels = element("div", { className: "descriptor-panels" });
+    const demos = new Map<string, SettingDemo>();
+    const readSettings = (): Record<string, unknown> => {
+      const seeded = Object.fromEntries(descriptors.map((descriptor) => [descriptor.name, descriptor.value]));
+      const form = wrapper.closest("form");
+      return form ? { ...seeded, ...this.descriptorValues(form, descriptors, "setting") } : seeded;
+    };
+    const show = (name: string): void => {
+      for (const panel of panels.querySelectorAll<HTMLElement>("[data-descriptor]")) {
+        panel.hidden = panel.dataset.descriptor !== name;
+      }
+      for (const [demoName, demo] of demos) {
+        if (demoName === name) demo.restart();
+        else demo.stop();
+      }
+    };
+    for (const descriptor of descriptors) {
+      if (multiple) picker.append(element("option", { value: descriptor.name }, this.descriptorLabel(descriptor.name, prefix)));
+      const fieldName = `${prefix}:${descriptor.name}`;
+      const maximumThemes = prefix === "setting" && descriptor.name === "theme_count";
+      let control: HTMLElement;
+      if (descriptor.value_type === "boolean") {
+        control = element("label", { className: "checkbox-label" }, element("input", {
+          type: "checkbox", name: fieldName, checked: descriptor.value === true,
+        }), this.i18n.t("common.enabled"));
+      } else if (descriptor.value_type === "enum") {
+        control = element("select", { name: fieldName }, ...descriptor.options.map((option) => element("option", {
+          value: option, selected: option === descriptor.value,
+        }, descriptor.name === "library_viewing_rule_default"
+          ? this.i18n.t(`packet_management.library_viewing_rule.${option}` as MessageKey)
+          : descriptor.name === "packets_per_lobby"
+            ? this.i18n.t(`policy.packets_per_lobby.${option}` as MessageKey)
+            : option)));
+      } else {
+        const maximumSelected = maximumThemes && descriptor.value === "max";
+        const serialized = descriptor.value_type === "array"
+          ? JSON.stringify(descriptor.value)
+          : descriptor.value == null ? "" : String(descriptor.value);
+        control = element("input", {
+          name: fieldName,
+          value: maximumSelected ? "" : serialized,
+          type: descriptor.value_type === "array" || descriptor.value_type === "string" ? "text" : "number",
+          step: descriptor.value_type === "integer" ? "1" : "any",
+          disabled: maximumSelected,
+          ...(["minimum_players", "maximum_players"].includes(descriptor.name)
+            ? { min: "1", max: "12", required: true } : {}),
+        });
+      }
+      const panelChildren: Node[] = [
+        element("h3", {}, this.descriptorLabel(descriptor.name, prefix)),
+        element("p", { className: "field-help" }, this.descriptorDescription(descriptor.description_key)),
+        control,
+      ];
+      if (maximumThemes) {
+        const maximumToggle = element("input", {
+          type: "checkbox", name: `${fieldName}:max`, checked: descriptor.value === "max",
+        });
+        maximumToggle.addEventListener("change", () => {
+          if (control instanceof HTMLInputElement) control.disabled = maximumToggle.checked;
+        });
+        panelChildren.push(element(
+          "label",
+          { className: "checkbox-label" },
+          maximumToggle,
+          this.i18n.t("setting.theme_count.use_max"),
+        ));
+      }
+      if (prefix === "setting" && MESSAGE_FLOW_SETTINGS.has(descriptor.name)) {
+        const demo = createSettingDemo(descriptor.name, readSettings, this.i18n);
+        demos.set(descriptor.name, demo);
+        control.addEventListener("input", () => demo.restart());
+        control.addEventListener("change", () => demo.restart());
+        panelChildren.push(demo.root);
+      }
+      panels.append(element(
+        "section",
+        { className: "descriptor-panel", "data-descriptor": descriptor.name },
+        ...panelChildren,
+      ));
+    }
+    if (multiple) {
+      picker.addEventListener("change", () => show(picker.value));
+      wrapper.append(picker, panels);
+    } else {
+      wrapper.append(panels);
+    }
+    show(descriptors[0]?.name ?? "");
+    return wrapper;
+  }
+
+  private renderCategorizedSettings(
+    descriptors: TournamentManagerSettingsResource["setting_descriptors"],
+    prefix: "setting" | "policy",
+  ): HTMLElement {
+    const container = element("div", { className: "descriptor-categories" });
+    const used = new Set<string>();
+    const pick = (names: readonly string[]): ManagerSettingDescriptor[] => {
+      const items = descriptors.filter((item) => names.includes(item.name) && !used.has(item.name));
+      for (const item of items) used.add(item.name);
+      return items;
+    };
+    const remaining = (): ManagerSettingDescriptor[] =>
+      descriptors.filter((item) => !used.has(item.name));
+    const timingPattern = /(_delay|_timeout)$/;
+    const timingItems = remaining().filter((item) => timingPattern.test(item.name) && item.name !== "question_token_delay");
+    for (const item of timingItems) used.add(item.name);
+    const categories: Array<[MessageKey, ManagerSettingDescriptor[]]> = [
+      ["settings.category.players", pick(["minimum_players", "maximum_players"])],
+      ["settings.category.themes", pick(["theme_count"])],
+      [
+        "settings.category.question_appearance",
+        pick(["question_values", "minus_multiplier", "question_token_target_chars", "question_token_delay"]),
+      ],
+      ["settings.category.timings", timingItems],
+      ["settings.category.other", remaining()],
+    ];
+    for (const [key, items] of categories) {
+      if (!items.length) continue;
+      container.append(element("section", { className: "descriptor-category" },
+        element("h3", {}, this.i18n.t(key)), this.renderDescriptorGroup(items, prefix)));
+    }
+    return container;
+  }
+
+
+  private descriptorLabel(name: string, kind: "setting" | "policy"): string {
+    const key = `${kind}.${name}.label` as MessageKey;
+    return this.i18n.t(key) || name.replaceAll("_", " ");
+  }
+
+  private descriptorDescription(key: string): string {
+    return this.i18n.t(key as MessageKey) || key;
+  }
+
+  private descriptorValues(
+    form: HTMLFormElement,
+    descriptors: ManagerSettingDescriptor[],
+    prefix: "setting" | "policy",
+  ): Record<string, unknown> {
+    const values: Record<string, unknown> = {};
+    for (const descriptor of descriptors) {
+      const control = form.elements.namedItem(`${prefix}:${descriptor.name}`) as HTMLInputElement | HTMLSelectElement | null;
+      if (!control) continue;
+      if (descriptor.name === "theme_count" && prefix === "setting") {
+        const maximum = form.elements.namedItem(`${prefix}:theme_count:max`) as HTMLInputElement | null;
+        if (maximum?.checked) {
+          values[descriptor.name] = "max";
+          continue;
+        }
+      }
+      if (descriptor.value_type === "boolean") values[descriptor.name] = (control as HTMLInputElement).checked;
+      else if (descriptor.value_type === "array") values[descriptor.name] = JSON.parse(control.value);
+      else if (descriptor.value_type === "integer") values[descriptor.name] = control.value ? Number.parseInt(control.value, 10) : null;
+      else if (descriptor.value_type === "number") values[descriptor.name] = Number(control.value);
+      else values[descriptor.name] = control.value;
+    }
+    return values;
+  }
+
+  private pricingPlans(form: HTMLFormElement): Array<{
+    name: string;
+    prices: Array<{ amount: number; currency: string }>;
+  }> {
+    const plans: Array<{ name: string; prices: Array<{ amount: number; currency: string }> }> = [];
+    for (const plan of form.querySelectorAll<HTMLElement>("[data-pricing-plan]")) {
+      const name = plan.querySelector<HTMLInputElement>("[name=pricing_name]")?.value.trim() ?? "";
+      const prices: Array<{ amount: number; currency: string }> = [];
+      for (const row of plan.querySelectorAll<HTMLElement>(".pricing-price-row")) {
+        const amount = Number(row.querySelector<HTMLInputElement>("[name=pricing_amount]")?.value ?? "");
+        const currency = row.querySelector<HTMLInputElement>("[name=pricing_currency]")?.value.trim().toUpperCase() ?? "";
+        if (!amount && !currency) continue;
+        prices.push({ amount, currency });
+      }
+      if (name || prices.length) plans.push({ name, prices });
+    }
+    return plans;
+  }
+
+  private registeredAuthorPicker(
+    route: RouteMatch,
+    path: string,
+    selected: RegisteredAuthor | undefined,
+    onSelect: (author: RegisteredAuthor | undefined) => void,
+  ): HTMLElement {
+    const search = element("input", {
+      type: "search", maxlength: "300",
+      placeholder: this.i18n.t("manager_settings.author_search_placeholder"),
+      "aria-label": this.i18n.t("manager_settings.author_search"),
+    });
+    const choices = new Map<string, RegisteredAuthor>();
+    if (selected) choices.set(selected.author_id, selected);
+    const picker = element("select", { "aria-label": this.i18n.t("packet_editor.author_select") });
+    const renderOptions = (items: RegisteredAuthor[], id: string): void => {
+      for (const author of items) choices.set(author.author_id, author);
+      const visible = new Map(items.map((author) => [author.author_id, author]));
+      if (id && choices.has(id)) visible.set(id, choices.get(id)!);
+      replaceChildren(picker,
+        element("option", { value: "" }, this.i18n.t("packet_editor.author_select")),
+        ...Array.from(visible.values()).map((author) => element("option", {
+          value: author.author_id,
+        }, author.display_name)),
+      );
+      picker.value = id;
+    };
+    renderOptions(selected ? [selected] : [], selected?.author_id ?? "");
+    picker.addEventListener("change", () => onSelect(choices.get(picker.value)));
+    const errorText = element("p", { className: "field-help", role: "status" });
+    let requestSequence = 0;
+    let timer: number | undefined;
+    let loaded = false;
+    const loadAuthors = async (): Promise<void> => {
+      const sequence = ++requestSequence;
+      try {
+        const result = await this.api.request<{ items: RegisteredAuthor[] }>(
+          `${path}${path.includes("?") ? "&" : "?"}query=${encodeURIComponent(search.value)}`,
+        );
+        if (sequence !== requestSequence || !picker.isConnected) return;
+        renderOptions(result.items, picker.value);
+        errorText.textContent = result.items.length ? "" : this.i18n.t("packet_editor.authors_no_matches");
+        loaded = true;
+      } catch (error) {
+        if (sequence === requestSequence) {
+          const code = error instanceof ApiError ? error.code : "internal_error";
+          errorText.textContent = this.i18n.t(`error.${code}`);
+        }
+      }
+    };
+    picker.addEventListener("focus", () => { if (!loaded) void loadAuthors(); });
+    search.addEventListener("input", () => {
+      requestSequence += 1;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void loadAuthors(), 200);
+    });
+    const create = element("button", { type: "button", className: "secondary-button" }, this.i18n.t("manager_settings.author_add_new"));
+    create.addEventListener("click", () => this.showNewAuthorDialog(route, {
+      path,
+      onCreated: (author) => {
+        renderOptions([author], author.author_id);
+        onSelect(author);
+      },
+    }));
+    return element("div", { className: "packet-author-picker" },
+      element("label", {}, this.i18n.t("packet_editor.author_associate"), search, picker),
+      errorText,
+      element("div", { className: "inline-actions" }, this.i18n.t("packet_editor.or"), create),
+    );
+  }
+
+  private showNewAuthorDialog(route: RouteMatch, packetAuthor?: {
+    path: string;
+    onCreated: (author: RegisteredAuthor) => void;
+  }): void {
+    const authorForm = element(
+      "form",
+      { className: "settings-form" },
+      element("label", {}, this.i18n.t("manager_settings.author_first_name"), element("input", { name: "first_name", required: true })),
+      element("label", {}, this.i18n.t("manager_settings.author_second_name"), element("input", { name: "second_name" })),
+      element("label", {}, this.i18n.t("manager_settings.author_surname"), element("input", { name: "surname", required: true })),
+      element("label", {}, this.i18n.t("manager_settings.author_telegram"), element("input", { name: "telegram_link", type: "text", placeholder: "https://t.me/username" })),
+      element("button", { type: "submit", className: "primary-button" }, this.i18n.t("manager_settings.author_register")),
+    );
+    const dialog = element(
+      "dialog",
+      { className: "tournament-dialog", "aria-labelledby": "new-author-title" },
+      element("div", { className: "dialog-heading" }, element("h2", { id: "new-author-title" }, this.i18n.t("manager_settings.author_add_new")), element("button", { type: "button", className: "icon-button", "aria-label": this.i18n.t("common.close") }, "×")),
+      authorForm,
+    );
+    dialog.querySelector<HTMLButtonElement>(".icon-button")?.addEventListener("click", () => dialog.close());
+    authorForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(authorForm);
+      try {
+        const response = await this.api.request<TournamentManagerSettingsResource | RegisteredAuthor>(
+          packetAuthor?.path ?? `/api/miniapp/manager/tournaments/${encodeURIComponent(route.params.launch_ref ?? "")}/authors`,
+          {
+            method: "POST",
+            body: {
+              first_name: String(data.get("first_name") ?? ""),
+              second_name: String(data.get("second_name") ?? "") || null,
+              surname: String(data.get("surname") ?? ""),
+              telegram_link: String(data.get("telegram_link") ?? "") || null,
+            },
+          },
+        );
+        dialog.close();
+        if (packetAuthor && "author_id" in response) packetAuthor.onCreated(response);
+        else if ("tournament" in response) this.renderManagerSettings(route, { ...response, kind: "manager_settings", state: "ready" });
+      } catch (error) {
+        await this.handleManagerSettingsError(route, authorForm, error);
+      }
+    });
+    dialog.addEventListener("close", () => dialog.remove(), { once: true });
+    document.body.append(dialog);
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  }
+
+  private async saveManagerSettings(
+    route: RouteMatch,
+    resource: TournamentManagerSettingsResource,
+    form: HTMLFormElement,
+  ): Promise<void> {
+    const data = new FormData(form);
+    const inferredType = (candidate: unknown): ManagerSettingDescriptor["value_type"] =>
+      Array.isArray(candidate) ? "array" : typeof candidate === "boolean" ? "boolean" : Number.isInteger(candidate) ? "integer" : typeof candidate === "number" ? "number" : "string";
+    const settingDescriptors = resource.setting_descriptors ?? Object.entries(resource.default_parameters).map(([name, candidate]) => ({
+      name, value: candidate, value_type: inferredType(candidate), description_key: `ruleset.${resource.tournament.ruleset_key}.${name}.description`, options: [],
+    }));
+    const policyDescriptors = resource.policy_descriptors ?? Object.entries(resource.policies).filter(([name]) => name !== "ruleset_rating_weight").map(([name, candidate]) => ({
+      name, value: candidate, value_type: inferredType(candidate), description_key: `policy.${name}.description`, options: [],
+    }));
+    const value = (name: string): string => String(data.get(name) ?? "").trim();
+    const timestamp = (name: string): string | null => {
+      const raw = value(name);
+      return raw ? new Date(raw).toISOString() : null;
+    };
+    try {
+      const response = await this.api.request<TournamentManagerSettingsResource>(
+        `/api/miniapp/manager/tournaments/${encodeURIComponent(route.params.launch_ref ?? "")}/settings`,
+        {
+          method: "POST",
+          body: {
+            expected_version: resource.settings_version,
+            name: value("name"),
+            slug: value("slug"),
+            description: value("description"),
+            organizer_contacts: value("organizer_contacts"),
+            channel: value("channel"),
+            type_key: value("type_key") || resource.tournament.type_key,
+            game_ruleset_key: value("game_ruleset_key") || resource.tournament.ruleset_key,
+            visibility: value("visibility"),
+            language: value("language"),
+            payment_type: value("payment_type"),
+            pricing_plans: value("payment_type") === "free" ? [] : this.pricingPlans(form),
+            registration_open: value("registration_open") === "on",
+            ignore_late_registrations: data.has("ignore_late_registrations"),
+            registration_starts_at: timestamp("registration_starts_at"),
+            registration_ends_at: timestamp("registration_ends_at"),
+            starts_at: timestamp("starts_at"),
+            planned_ends_at: timestamp("planned_ends_at"),
+            author_ids: data.getAll("author_ids").map(String),
+            author_names: [],
+            default_parameters: this.descriptorValues(form, settingDescriptors, "setting"),
+            player_mutable_parameters: data.getAll("player_mutable_parameters").map(String),
+            policies: this.descriptorValues(form, policyDescriptors, "policy"),
+            registration_requirements: Array.from(form.querySelectorAll<HTMLElement>("[data-requirement]")).map((row) => ({
+              kind: row.querySelector<HTMLSelectElement>('select[name="requirement_kind"]')!.value,
+              target_id: row.querySelector<HTMLInputElement>('input[name="requirement_target"]')!.value.trim(),
+              failure_message: row.querySelector<HTMLInputElement>('input[name="requirement_message"]')!.value.trim() || null,
+            })),
+          },
+        },
+      );
+      this.renderManagerSettings(route, { ...response, kind: "manager_settings", state: "ready" });
+    } catch (error) {
+      await this.handleManagerSettingsError(route, form, error);
+    }
+  }
+
+  private async finalizeTournament(
+    route: RouteMatch,
+    resource: TournamentManagerSettingsResource,
+  ): Promise<void> {
+    if (!window.confirm(this.i18n.t("manager_settings.finalize_confirm"))) return;
+    try {
+      const response = await this.api.request<TournamentManagerSettingsResource>(
+        `/api/miniapp/manager/tournaments/${encodeURIComponent(route.params.launch_ref ?? "")}/finalize`,
+        { method: "POST", body: { expected_version: resource.settings_version } },
+      );
+      this.renderManagerSettings(route, { ...response, kind: "manager_settings", state: "ready" });
+    } catch (error) {
+      await this.handleManagerSettingsError(route, this.root, error);
+    }
+  }
+
+  private async handleManagerSettingsError(
+    route: RouteMatch,
+    container: Element,
+    error: unknown,
+  ): Promise<void> {
+    const code = error instanceof ApiError ? error.code : "validation_failed";
+    if (code === "stale_write") {
+      await this.load(route);
+      return;
+    }
+    container.querySelector(".inline-error")?.remove();
+    const alert = this.statusCard("error", this.i18n.t(`error.${code}`));
+    alert.classList.add("inline-error");
+    container.append(alert);
+  }
+
+  private async handleTournamentAction(
+    route: RouteMatch,
+    resource: TournamentRouteResource,
+    item: TournamentListItem,
+    action: TournamentAction,
+    button: HTMLButtonElement,
+  ): Promise<void> {
+    button.disabled = true;
+    try {
+      if (action === "info") {
+        this.router.navigate(`/tournaments/${encodeURIComponent(item.id)}`);
+        return;
+      }
+      if (action === "select_manager") {
+        this.router.navigate(`/manager/tournaments/${encodeURIComponent(item.id)}/management`);
+        return;
+      }
+      if (action === "register") {
+        const decision = await this.api.request<TournamentRegistrationPayload>(
+          `/api/miniapp/tournaments/${encodeURIComponent(item.id)}/register`,
+          { method: "POST", body: {} },
+        );
+        if (decision.accepted) {
+          await this.load(route);
+        } else {
+          this.showTextDialog(
+            this.i18n.t("tournament.registration_rejected"),
+            decision.reasons.length ? decision.reasons : [this.i18n.t("error.validation_failed")],
+          );
+        }
+        return;
+      }
+      const mode = "player";
+      await this.api.request(`/api/miniapp/tournaments/${encodeURIComponent(item.id)}/select`, {
+        method: "POST",
+        body: { mode, expected_version: resource.navigation_version },
+      });
+      window.location.assign("/auth/bot");
+    } catch (error) {
+      const code = error instanceof ApiError ? error.code : "internal_error";
+      const alert = this.statusCard("error", this.i18n.t(`error.${code}`));
+      alert.classList.add("inline-error");
+      button.closest("article")?.append(alert);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  private promptSuspicionClear(route: RouteMatch, card: SuspicionLedgerCard): void {
+    const note = element("textarea", { rows: "3" }) as HTMLTextAreaElement;
+    const form = element(
+      "form",
+      { className: "settings-form" },
+      element("h2", {}, card.display_name ?? card.telegram_username ?? card.player_id),
+      element("p", {}, `${this.i18n.t("admin_suspicion.player_id")}: ${card.player_id}`),
+      element("p", {}, this.i18n.t("admin_suspicion.clear_prompt")),
+      element("label", {}, this.i18n.t("admin_suspicion.clear_note"), note),
+      element(
+        "div",
+        { className: "settings-actions" },
+        element("button", { type: "submit", className: "primary-button" }, this.i18n.t("admin_suspicion.clear_confirm")),
+        element(
+          "button",
+          {
+            type: "button",
+            className: "secondary-button",
+            onclick: (() => this.router.navigate(route.id === "admin_management" ? "/admin/management?section=players" : "/admin/suspicion")) as EventListener,
+          },
+          this.i18n.t("admin_suspicion.clear_cancel"),
+        ),
+      ),
+    ) as HTMLFormElement;
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const value = note.value.trim();
+      if (!value) return;
+      void this.submitSuspicionClear(route, card, value);
+    });
+    this.renderFrame(route, element("section", { className: "route-content" }, form));
+  }
+
+  private async submitSuspicionClear(
+    route: RouteMatch,
+    card: SuspicionLedgerCard,
+    note: string,
+  ): Promise<void> {
+    this.renderFrame(route, this.statusCard("loading", this.i18n.t("common.loading")));
+    try {
+      await this.api.request(
+        `/api/miniapp/admin/suspicion/ledger/${encodeURIComponent(card.player_id)}/clear`,
+        { method: "POST", body: { note } },
+      );
+    } catch (error) {
+      const code = error instanceof ApiError ? error.code : "internal_error";
+      this.showTextDialog(this.i18n.t("admin_suspicion.clear"), [this.i18n.t(`error.${code}`)]);
+      return;
+    }
+    this.router.navigate(route.id === "admin_management" ? "/admin/management?section=players" : "/admin/suspicion");
+  }
+
+  private showExistingPacketDialog(route: RouteMatch): void {
+    type Preview = { packet_id: string; packet_version_id: string; name: string;
+      year: number | null; lead_author: string; authors: string[];
+      theme_count: number; question_count: number };
+    const input = element("input", { type: "text", required: true, autocomplete: "off" });
+    const details = element("div", { "aria-live": "polite" });
+    const errorText = element("p", { role: "alert" });
+    const submit = element("button", { type: "submit", className: "primary-button" }, this.i18n.t("packet_management.add"));
+    const cancel = element("button", { type: "button", className: "secondary-button" }, this.i18n.t("packet_management.cancel"));
+    const form = element("form", {}, element("label", {}, this.i18n.t("packet_management.packet_id"), input),
+      details, errorText, element("div", { className: "inline-actions" }, submit, cancel));
+    const dialog = element("dialog", { className: "tournament-dialog", "aria-labelledby": "existing-packet-title" },
+      element("h2", { id: "existing-packet-title" }, this.i18n.t("packet_management.add_existing")), form);
+    let preview: Preview | null = null;
+    const close = (): void => { if (typeof dialog.close === "function") dialog.close(); dialog.remove(); };
+    cancel.addEventListener("click", close);
+    dialog.addEventListener("close", () => dialog.remove(), { once: true });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (submit.disabled) return;
+      submit.disabled = true;
+      errorText.textContent = "";
+      const path = `/api/miniapp/manager/tournaments/${encodeURIComponent(route.params.launch_ref ?? "")}/existing-packets`;
+      try {
+        if (preview) {
+          const updated = await this.api.request<TournamentManagerManagementResource>(`${path}/add`, {
+            method: "POST", body: { packet_id: preview.packet_id, expected_version_id: preview.packet_version_id },
+          });
+          close();
+          this.renderManagerManagement(route, { ...updated, kind: "manager_management", state: "ready" });
+        } else {
+          preview = await this.api.request<Preview>(`${path}/preview`, {
+            method: "POST", body: { packet_id: input.value.trim() },
+          });
+          input.disabled = true;
+          details.replaceChildren(element("h3", {}, preview.name), element("dl", { className: "detail-list" },
+            ...([
+              ["lobby.packet_year", preview.year?.toString() ?? "—"],
+              ["lobby.packet_lead_author", preview.lead_author || "—"],
+              ["lobby.packet_authors", preview.authors.join(", ") || "—"],
+              ["packet_management.themes", String(preview.theme_count)],
+              ["packet_management.questions", String(preview.question_count)],
+            ] as const).flatMap(([key, value]) => [element("dt", {}, this.i18n.t(key)), element("dd", {}, value)])));
+          submit.textContent = this.i18n.t("packet_management.confirm_add");
+        }
+      } catch (error) {
+        errorText.textContent = this.i18n.t(`error.${error instanceof ApiError ? error.code : "internal_error"}`);
+        preview = null;
+        input.disabled = false;
+        details.replaceChildren();
+        submit.textContent = this.i18n.t("packet_management.add");
+      } finally { submit.disabled = false; }
+    });
+    document.body.append(dialog);
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    input.focus();
+  }
+
+  private showTextDialog(title: string, lines: string[]): void {
+    const dialog = element(
+      "dialog",
+      { className: "tournament-dialog", "aria-labelledby": "tournament-message-title" },
+      element(
+        "div",
+        { className: "dialog-heading" },
+        element("h2", { id: "tournament-message-title" }, title),
+        element(
+          "button",
+          { type: "button", className: "icon-button", "aria-label": this.i18n.t("common.close") },
+          "×",
+        ),
+      ),
+      element("ul", { className: "detail-list" }, ...lines.map((line) => element("li", {}, line))),
+    );
+    dialog.querySelector<HTMLButtonElement>(".icon-button")?.addEventListener("click", () => dialog.close());
+    dialog.addEventListener("close", () => dialog.remove(), { once: true });
+    document.body.append(dialog);
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  }
+
+  private badge(label: string, kind = "default"): HTMLElement {
+    return element("span", { className: `badge badge-${kind}` }, label);
+  }
+
+  private renderSuspicionLedger(route: RouteMatch, resource: AdminSuspicionLedgerResource): void {
+    if (!resource.items.length) {
+      this.renderFrame(
+        route,
+        this.statusCard("empty", this.i18n.t("route.admin_suspicion.empty")),
+      );
+      return;
+    }
+    const list = element("div", { className: "lobby-packets", "aria-live": "polite" });
+    for (const card of resource.items) {
+      const rulesetLines = card.rulesets.length
+        ? card.rulesets.map(
+            (stat) =>
+              `${stat.ruleset_key}: ${this.i18n.t("admin_suspicion.rating")} ${
+                stat.rating ?? "—"
+              }, ${this.i18n.t("admin_suspicion.games_played")} ${stat.games_played}`,
+          )
+        : [this.i18n.t("admin_suspicion.no_rulesets")];
+      const children: (Node | null)[] = [
+        element("h2", {}, card.display_name ?? card.telegram_username ?? card.player_id),
+        element("p", {}, `${this.i18n.t("admin_suspicion.player_id")}: ${card.player_id}`),
+        element("p", {}, `${this.i18n.t("admin_suspicion.suspicion")}: ${card.suspicion}`),
+        element("h3", {}, this.i18n.t("admin_suspicion.rulesets")),
+        ...rulesetLines.map((line) => element("p", {}, line)),
+      ];
+      if (card.reports.length) {
+        children.push(
+          element("h3", {}, this.i18n.t("admin_suspicion.reports")),
+          ...card.reports.map((report) => element("p", {}, `${report.kind}: ${report.count}`)),
+        );
+      }
+      children.push(
+        element(
+          "div",
+          { className: "settings-actions" },
+          element(
+            "button",
+            {
+              type: "button",
+              className: "primary-button",
+              onclick: (() => void this.inspectSuspicion(route, card)) as EventListener,
+            },
+            this.i18n.t("admin_suspicion.inspect"),
+          ),
+          element(
+            "button",
+            {
+              type: "button",
+              className: "secondary-button",
+              onclick: (() => this.promptSuspicionClear(route, card)) as EventListener,
+            },
+            this.i18n.t("admin_suspicion.clear"),
+          ),
+        ),
+      );
+      list.append(
+        element(
+          "article",
+          { className: "resource-card", "data-player-id": card.player_id },
+          ...children.filter((child): child is Node => child !== null),
+        ),
+      );
+    }
+    this.renderFrame(route, element("section", { className: "route-content" }, list));
+    queueMicrotask(() => document.querySelector<HTMLElement>("#page-title")?.focus());
+  }
+
+  private renderAdminManagementRoute(route: RouteMatch, resource: AdminManagementResource): void {
+    const filterKey = `admin_management_${resource.section}`;
+    this.renderFrame(route, renderAdminManagement(resource, this.i18n, this.filters.read(filterKey),
+      (filters) => this.filters.write(filterKey, filters),
+      (path) => this.router.navigate(path),
+      (card, command, button) => void this.adminManagementAction(route, resource, card, command, button),
+      (card, weight, button) => void this.adminTournamentWeight(route, card, weight, button)));
+  }
+
+  private async adminTournamentWeight(route: RouteMatch, card: AdminCard,
+    weight: number, button: HTMLButtonElement): Promise<void> {
+    button.disabled = true;
+    try {
+      await this.api.request(
+        `/api/miniapp/admin/management/tournaments/${encodeURIComponent(card.id)}/rating_weight`,
+        { method: "POST", body: { weight, expected_version: card.settings_version }, signal: this.request?.signal },
+      );
+      await this.load(route);
+    } catch (error) {
+      const code = error instanceof ApiError ? error.code : "internal_error";
+      this.showTextDialog(this.i18n.t("admin_management.title"), [this.i18n.t(`error.${code}`)]);
+      if (code === "stale_write") await this.load(route);
+    } finally { button.disabled = false; }
+  }
+
+  private async adminManagementAction(route: RouteMatch, resource: AdminManagementResource,
+    card: AdminCard, command: string, button: HTMLButtonElement): Promise<void> {
+    if (command === "view" || command === "download") {
+      await this.accessLibrary(route, card.id, command, button);
+      return;
+    }
+    const suspicionCard: SuspicionLedgerCard = {
+      player_id: card.id, display_name: typeof card.public_nickname === "string" ? card.public_nickname : null,
+      telegram_username: typeof card.telegram_username === "string" ? card.telegram_username : null,
+      suspicion: Number(card.suspicion ?? 0), rulesets: [], reports: [],
+    };
+    if (command === "review_suspicion") { await this.inspectSuspicion(route, suspicionCard); return; }
+    if (command === "clear_suspicion") { this.promptSuspicionClear(route, suspicionCard); return; }
+    const body: Record<string, unknown> = {};
+    if (resource.section === "tournaments") {
+      if (!window.confirm(this.i18n.t(`admin_management.${command}_confirm` as MessageKey))) return;
+      body.confirm = true; body.expected_version = card.settings_version;
+    } else if (command === "link") {
+      const target = window.prompt(this.i18n.t("admin_management.link_prompt"));
+      if (!target?.trim()) return;
+      body.target = target.trim();
+    } else if (command === "merge") {
+      this.promptAuthorMerge(route, card);
+      return;
+    } else if (command === "approve" || command === "reject") {
+      if (!window.confirm(this.i18n.t(`admin_management.${command}_confirm`))) return;
+      body.approve = command === "approve";
+    } else if (command === "ban") {
+      const reason = window.prompt(this.i18n.t("admin_management.ban_prompt"));
+      if (reason === null) return;
+      body.reason = reason.trim() || null;
+    } else if (!window.confirm(this.i18n.t("admin_management.unban_confirm"))) return;
+    button.disabled = true;
+    try {
+      await this.api.request(`/api/miniapp/admin/management/${resource.section}/${encodeURIComponent(card.id)}/${command}`,
+        { method: "POST", body, signal: this.request?.signal });
+      await this.load(route);
+    } catch (error) {
+      const code = error instanceof ApiError ? error.code : "internal_error";
+      this.showTextDialog(this.i18n.t("admin_management.title"), [this.i18n.t(`error.${code}`)]);
+      if (code === "stale_write") await this.load(route);
+    } finally { button.disabled = false; }
+  }
+
+  private promptAuthorMerge(route: RouteMatch, card: AdminCard): void {
+    const search = element("input", {
+      type: "search", maxlength: "300",
+      placeholder: this.i18n.t("authors_link.search_placeholder"),
+      "aria-label": this.i18n.t("admin_management.merge_search"),
+    });
+    const picker = element("select", { "aria-label": this.i18n.t("admin_management.merge_select") });
+    const errorText = element("p", { className: "field-help", role: "status" });
+    let requestSequence = 0;
+    let timer: number | undefined;
+    const loadAuthors = async (): Promise<void> => {
+      const sequence = ++requestSequence;
+      try {
+        const result = await this.api.request<AuthorSearchPage>(
+          `/api/miniapp/authors?query=${encodeURIComponent(search.value)}`,
+          { signal: this.request?.signal },
+        );
+        if (sequence !== requestSequence || !picker.isConnected) return;
+        replaceChildren(picker,
+          element("option", { value: "" }, this.i18n.t("admin_management.merge_select")),
+          ...result.items
+            .filter((author) => author.author_id !== card.id)
+            .map((author) => element("option", { value: author.author_id }, author.display_name)));
+        errorText.textContent = "";
+      } catch (error) {
+        if (sequence === requestSequence) {
+          const code = error instanceof ApiError ? error.code : "internal_error";
+          errorText.textContent = this.i18n.t(`error.${code}` as MessageKey);
+        }
+      }
+    };
+    picker.addEventListener("focus", () => { if (!picker.options.length) void loadAuthors(); });
+    search.addEventListener("input", () => {
+      requestSequence += 1;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void loadAuthors(), 200);
+    });
+    void loadAuthors();
+    const confirmButton = element("button", { type: "submit", className: "danger-button" },
+      this.i18n.t("admin_management.merge_action"));
+    const form = element("form", { className: "settings-form" },
+      element("p", { className: "field-help" }, this.i18n.t("admin_management.merge_help")),
+      element("label", {}, this.i18n.t("admin_management.merge_search"), search),
+      element("label", {}, this.i18n.t("admin_management.merge_select"), picker),
+      errorText, confirmButton);
+    const dialog = element(
+      "dialog",
+      { className: "tournament-dialog", "aria-labelledby": "merge-author-title" },
+      element("div", { className: "dialog-heading" },
+        element("h2", { id: "merge-author-title" }, this.i18n.t("admin_management.merge_title")),
+        element("button", {
+          type: "button", className: "icon-button", "aria-label": this.i18n.t("common.close"),
+        }, "×")),
+      form,
+    );
+    dialog.querySelector<HTMLButtonElement>(".icon-button")?.addEventListener("click", () => dialog.close());
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!picker.value) {
+        errorText.textContent = this.i18n.t("admin_management.merge_select_required");
+        return;
+      }
+      if (!window.confirm(this.i18n.t("admin_management.merge_confirm"))) return;
+      confirmButton.disabled = true;
+      try {
+        await this.api.request(
+          `/api/miniapp/admin/management/authors/${encodeURIComponent(card.id)}/merge`,
+          { method: "POST", body: { merge_author_id: picker.value, confirm: true }, signal: this.request?.signal },
+        );
+        dialog.close();
+        await this.load(route);
+      } catch (error) {
+        const code = error instanceof ApiError ? error.code : "internal_error";
+        errorText.textContent = this.i18n.t(`error.${code}` as MessageKey);
+      } finally {
+        confirmButton.disabled = false;
+      }
+    });
+    dialog.addEventListener("close", () => dialog.remove(), { once: true });
+    document.body.append(dialog);
+    if (typeof dialog.showModal === "function") dialog.showModal();
+  }
+
+  private async inspectSuspicion(route: RouteMatch, card: SuspicionLedgerCard): Promise<void> {
+    this.renderFrame(route, this.statusCard("loading", this.i18n.t("common.loading")));
+    try {
+      const payload = await this.api.request<AdminSuspicionInspectionPayload>(
+        `/api/miniapp/admin/suspicion/ledger/${encodeURIComponent(card.player_id)}/events`,
+      );
+      this.renderSuspicionInspection(route, payload);
+    } catch (error) {
+      const code = error instanceof ApiError ? error.code : "internal_error";
+      this.renderError(route, code);
+    }
+  }
+
+  private renderSuspicionInspection(
+    route: RouteMatch,
+    payload: AdminSuspicionInspectionPayload,
+  ): void {
+    const player = payload.player;
+    const events: Node[] = payload.events.length
+      ? payload.events.map((event) =>
+          element(
+            "article",
+            { className: "library-question" },
+            element(
+              "h3",
+              {},
+              `${event.reason}${event.ruleset_key ? ` · ${event.ruleset_key}` : ""} · ${this.formatDate(event.created_at)}`,
+            ),
+            element(
+              "p",
+              {},
+              `${this.i18n.t("admin_suspicion.event_delta")}: ${event.before} → ${event.after} (+${event.delta})`,
+            ),
+            event.note
+              ? element("p", {}, `${this.i18n.t("admin_suspicion.note")}: ${event.note}`)
+              : null,
+            ...event.evidence.map((evidence) =>
+              element(
+                "p",
+                {},
+                `${this.i18n.t("admin_suspicion.evidence")}: ${evidence.signal} · ${this.formatDate(evidence.created_at)}`,
+              ),
+            ),
+          ),
+        )
+      : [element("p", {}, this.i18n.t("admin_suspicion.no_events"))];
+    this.renderFrame(
+      route,
+      element(
+        "section",
+        { className: "route-content" },
+        element("h2", {}, player.display_name ?? player.telegram_username ?? player.id),
+        element("p", {}, `${this.i18n.t("admin_suspicion.player_id")}: ${player.id}`),
+        element("p", {}, `${this.i18n.t("admin_suspicion.suspicion")}: ${player.suspicion}`),
+        element("h3", {}, this.i18n.t("admin_suspicion.events_title")),
+        ...events,
+        element(
+          "button",
+          {
+            type: "button",
+            className: "secondary-button",
+            onclick: (() => this.router.navigate(route.id === "admin_management" ? "/admin/management?section=players" : "/admin/suspicion")) as EventListener,
+          },
+          this.i18n.t("admin_suspicion.back_to_ledger"),
+        ),
+      ),
+    );
+    queueMicrotask(() => document.querySelector<HTMLElement>("#page-title")?.focus());
+  }
+
+  private detail(label: string, value: string): HTMLElement {
+    return element("p", { className: "tournament-detail" }, element("strong", {}, `${label}: `), value);
+  }
+
+  private formatDate(value?: string | null): string {
+    if (!value) return this.i18n.t("tournament.not_set");
+    const date = new Date(value);
+    return Number.isNaN(date.valueOf())
+      ? this.i18n.t("tournament.not_set")
+      : new Intl.DateTimeFormat(this.i18n.locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
+  }
+
+  private renderError(route: RouteMatch, code: StableErrorCode): void {
+    const key: MessageKey = code === "authentication_required"
+      ? "website.login_required" : `error.${code}`;
+    const card = this.statusCard("error", this.i18n.t(key));
+    if (code === "authentication_required") {
+      card.append(element("a", { href: "/auth/telegram", className: "primary-button" }, this.i18n.t("website.login")));
+    }
+    if (code !== "authentication_required" && code !== "forbidden") {
+      card.append(
+        element(
+          "button",
+          { type: "button", className: "primary-button", onclick: (() => void this.load(route)) as EventListener },
+          this.i18n.t("common.retry"),
+        ),
+      );
+    }
+    this.renderFrame(route, card);
+  }
+
+  private statusCard(kind: "loading" | "empty" | "error", message: string): HTMLElement {
+    const indicator = kind === "loading" ? element("span", { className: "spinner", "aria-hidden": "true" }) : null;
+    return element(
+      "section",
+      { className: `status-card status-${kind}`, role: kind === "error" ? "alert" : "status", "aria-live": "polite" },
+      indicator,
+      element("p", {}, message),
+    );
+  }
+
+  private pagination(route: RouteMatch, page: NonNullable<RoutePayload["pagination"]>): HTMLElement {
+    const move = (cursor: string): void => {
+      const query = new URLSearchParams(route.query);
+      query.set("cursor", cursor);
+      this.router.navigate(`${route.path}?${query.toString()}`);
+    };
+    return element(
+      "nav",
+      { className: "pagination", "aria-label": `${this.i18n.t("common.previous")} / ${this.i18n.t("common.next")}` },
+      element(
+        "button",
+        {
+          type: "button",
+          disabled: !page.previous,
+          onclick: page.previous ? (() => move(page.previous!)) as EventListener : undefined,
+        },
+        this.i18n.t("common.previous"),
+      ),
+      element(
+        "button",
+        {
+          type: "button",
+          disabled: !page.next,
+          onclick: page.next ? (() => move(page.next!)) as EventListener : undefined,
+        },
+        this.i18n.t("common.next"),
+      ),
+    );
+  }
+
+}
+
+function isTournamentResource(value: RoutePayload["resource"]): value is TournamentRouteResource {
+  return "kind" in value && value.kind === "tournaments";
+}
+
+function isTournamentProfileResource(value: RoutePayload["resource"]): value is TournamentProfileResource {
+  return "kind" in value && value.kind === "tournament_profile";
+}
+
+function isTournamentChatResource(value: RoutePayload["resource"]): value is TournamentChatResource {
+  return "kind" in value && value.kind === "tournament_chat";
+}
+
+function isAuthorLinksResource(value: RoutePayload["resource"]): value is AuthorLinksResource {
+  return "kind" in value && value.kind === "author_links";
+}
+
+function isManagerSettingsResource(
+  value: RoutePayload["resource"],
+): value is TournamentManagerSettingsResource {
+  return "kind" in value && value.kind === "manager_settings";
+}
+
+function isManagerManagementResource(
+  value: RoutePayload["resource"],
+): value is TournamentManagerManagementResource {
+  return "kind" in value && value.kind === "manager_management";
+}
+
+function isLobbyResource(value: RoutePayload["resource"]): value is LobbyResource {
+  return "kind" in value && value.kind === "lobby";
+}
+
+function isPacketDraftResource(value: RoutePayload["resource"]): value is PacketDraftResource {
+  return "kind" in value && value.kind === "packet_draft";
+}
+
+function isPlayerProfileResource(value: RoutePayload["resource"]): value is PlayerProfileResource {
+  return "kind" in value && value.kind === "player_profile";
+}
+
+function isPlayerGameResource(value: RoutePayload["resource"]): value is PlayerGameResource {
+  return "kind" in value && value.kind === "player_game";
+}
+
+function isOngoingResource(value: RoutePayload["resource"]): value is OngoingResource {
+  return "kind" in value && value.kind === "ongoing";
+}
+
+function isSuspicionLedgerResource(
+  value: RoutePayload["resource"],
+): value is AdminSuspicionLedgerResource {
+  return "kind" in value && value.kind === "admin_suspicion_ledger";
+}
+
+function isTournamentAction(value: string): value is TournamentAction {
+  return ["info", "register", "select_player", "select_manager"].includes(value);
+}
+
+function dateTimeLocal(value?: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "";
+  const local = new Date(date.valueOf() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}

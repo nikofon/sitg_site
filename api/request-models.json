@@ -1,0 +1,2048 @@
+{
+  "contract_date": "2026-09-15",
+  "models": {
+    "AdminAuthorLinkOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "platform.admin.authors.link.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "author_id": {
+          "format": "uuid",
+          "title": "Author Id",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "author_id",
+        "target"
+      ],
+      "title": "AdminAuthorLinkOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:AdminAuthorLinkOperation"
+    },
+    "AdminManagementListOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "platform.admin.management.list.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "section": {
+          "default": "tournaments",
+          "enum": [
+            "tournaments",
+            "authors",
+            "players",
+            "packets"
+          ],
+          "title": "Section",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "AdminManagementListOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:AdminManagementListOperation"
+    },
+    "AdminPacketAccessOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "platform.admin.packets.access.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "version_id": {
+          "format": "uuid",
+          "title": "Version Id",
+          "type": "string"
+        },
+        "command": {
+          "enum": [
+            "view",
+            "download"
+          ],
+          "title": "Command",
+          "type": "string"
+        },
+        "confirm": {
+          "default": false,
+          "title": "Confirm",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "version_id",
+        "command"
+      ],
+      "title": "AdminPacketAccessOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:AdminPacketAccessOperation"
+    },
+    "AdminSuspicionClearOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "platform.admin.suspicion.clear.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "note": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "player_id",
+        "note"
+      ],
+      "title": "AdminSuspicionClearOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:AdminSuspicionClearOperation"
+    },
+    "AdminSuspicionInspectOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "platform.admin.suspicion.inspect.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "player_id"
+      ],
+      "title": "AdminSuspicionInspectOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:AdminSuspicionInspectOperation"
+    },
+    "AdminSuspicionLedgerOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "platform.admin.suspicion.ledger.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "AdminSuspicionLedgerOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:AdminSuspicionLedgerOperation"
+    },
+    "AdminTournamentModerateOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "platform.admin.tournaments.moderate.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "format": "uuid",
+          "title": "Tournament Id",
+          "type": "string"
+        },
+        "command": {
+          "enum": [
+            "halt",
+            "resume",
+            "abolish"
+          ],
+          "title": "Command",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "confirm": {
+          "default": false,
+          "title": "Confirm",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "tournament_id",
+        "command",
+        "expected_version"
+      ],
+      "title": "AdminTournamentModerateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:AdminTournamentModerateOperation"
+    },
+    "AuthorsSearchOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "authors.search.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "query": {
+          "default": "",
+          "maxLength": 300,
+          "title": "Query",
+          "type": "string"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cursor"
+        },
+        "limit": {
+          "default": 20,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "AuthorsSearchOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:AuthorsSearchOperation"
+    },
+    "GameObserveOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "games.observe.join.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "uuid",
+          "title": "Game Id",
+          "type": "string"
+        },
+        "confirm_fresh": {
+          "default": false,
+          "title": "Confirm Fresh",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "game_id"
+      ],
+      "title": "GameObserveOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:GameObserveOperation"
+    },
+    "LibraryAccessOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "library.view.v1",
+            "library.download.v1"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "version_id": {
+          "format": "uuid",
+          "title": "Version Id",
+          "type": "string"
+        },
+        "confirm": {
+          "default": false,
+          "title": "Confirm",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "version_id"
+      ],
+      "title": "LibraryAccessOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:LibraryAccessOperation"
+    },
+    "LibraryListOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "library.list.v1",
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "LibraryListOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:LibraryListOperation"
+    },
+    "LobbyEventsOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "lobbies.events.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "lobby_id": {
+          "format": "uuid",
+          "title": "Lobby Id",
+          "type": "string"
+        },
+        "after_sequence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "After Sequence",
+          "type": "integer"
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "lobby_id"
+      ],
+      "title": "LobbyEventsOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:LobbyEventsOperation"
+    },
+    "LobbyInfoOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "lobbies.info.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "lobby_id": {
+          "format": "uuid",
+          "title": "Lobby Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "lobby_id"
+      ],
+      "title": "LobbyInfoOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:LobbyInfoOperation"
+    },
+    "LobbyJoinOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "lobbies.join.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "invitation_code": {
+          "pattern": "^[A-Za-z0-9_-]{32}$",
+          "title": "Invitation Code",
+          "type": "string"
+        },
+        "role": {
+          "default": "player",
+          "enum": [
+            "player",
+            "observer"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "confirm_fresh": {
+          "default": false,
+          "title": "Confirm Fresh",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "invitation_code"
+      ],
+      "title": "LobbyJoinOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:LobbyJoinOperation"
+    },
+    "LobbyPacketOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "lobby_id": {
+          "format": "uuid",
+          "title": "Lobby Id",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "action": {
+          "enum": [
+            "lobbies.packets.select.v1",
+            "lobbies.packets.remove.v1"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "packet_id": {
+          "format": "uuid",
+          "title": "Packet Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lobby_id",
+        "expected_version",
+        "action",
+        "packet_id"
+      ],
+      "title": "LobbyPacketOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:LobbyPacketOperation"
+    },
+    "LobbyReadyUpdateOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "lobby_id": {
+          "format": "uuid",
+          "title": "Lobby Id",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "action": {
+          "const": "lobbies.ready.update.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "ready": {
+          "title": "Ready",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "lobby_id",
+        "expected_version",
+        "action",
+        "ready"
+      ],
+      "title": "LobbyReadyUpdateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:LobbyReadyUpdateOperation"
+    },
+    "LobbyRoleUpdateOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "lobby_id": {
+          "format": "uuid",
+          "title": "Lobby Id",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "action": {
+          "const": "lobbies.role.update.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "player",
+            "observer"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "confirm_fresh": {
+          "default": false,
+          "title": "Confirm Fresh",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "lobby_id",
+        "expected_version",
+        "action",
+        "role"
+      ],
+      "title": "LobbyRoleUpdateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:LobbyRoleUpdateOperation"
+    },
+    "LobbySettingsUpdateOperation": {
+      "$defs": {
+        "JsonValue": {}
+      },
+      "additionalProperties": false,
+      "properties": {
+        "lobby_id": {
+          "format": "uuid",
+          "title": "Lobby Id",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "action": {
+          "const": "lobbies.settings.update.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "changes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "minProperties": 1,
+          "title": "Changes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "lobby_id",
+        "expected_version",
+        "action",
+        "changes"
+      ],
+      "title": "LobbySettingsUpdateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:LobbySettingsUpdateOperation"
+    },
+    "LobbySimpleMutationOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "lobby_id": {
+          "format": "uuid",
+          "title": "Lobby Id",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "action": {
+          "enum": [
+            "lobbies.leave.v1",
+            "lobbies.cancel.v1",
+            "lobbies.start.v1",
+            "lobbies.search.start.v1",
+            "lobbies.search.cancel.v1"
+          ],
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lobby_id",
+        "expected_version",
+        "action"
+      ],
+      "title": "LobbySimpleMutationOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:LobbySimpleMutationOperation"
+    },
+    "NavigationTournamentSetOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "telegram.navigation.tournament.set.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "player",
+            "manager"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tournament Id"
+        },
+        "expected_version": {
+          "minimum": 0,
+          "title": "Expected Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "mode",
+        "tournament_id",
+        "expected_version"
+      ],
+      "title": "NavigationTournamentSetOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:NavigationTournamentSetOperation"
+    },
+    "OngoingListOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "ongoing.list.v1",
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "OngoingListOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:OngoingListOperation"
+    },
+    "PacketDraftAuthorCreateOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "packets.drafts.authors.create.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "draft_id": {
+          "format": "uuid",
+          "title": "Draft Id",
+          "type": "string"
+        },
+        "first_name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "First Name",
+          "type": "string"
+        },
+        "second_name": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Second Name"
+        },
+        "surname": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Surname",
+          "type": "string"
+        },
+        "telegram_link": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Telegram Link"
+        }
+      },
+      "required": [
+        "action",
+        "draft_id",
+        "first_name",
+        "surname"
+      ],
+      "title": "PacketDraftAuthorCreateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PacketDraftAuthorCreateOperation"
+    },
+    "PacketDraftDecisionOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "packets.drafts.publish.v1",
+            "packets.drafts.reject.v1"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "draft_id": {
+          "format": "uuid",
+          "title": "Draft Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "draft_id"
+      ],
+      "title": "PacketDraftDecisionOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PacketDraftDecisionOperation"
+    },
+    "PacketDraftGetOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "packets.drafts.get.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "draft_id": {
+          "format": "uuid",
+          "title": "Draft Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "draft_id"
+      ],
+      "title": "PacketDraftGetOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PacketDraftGetOperation"
+    },
+    "PacketDraftUpdateOperation": {
+      "$defs": {
+        "JsonValue": {}
+      },
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "packets.drafts.update.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "draft_id": {
+          "format": "uuid",
+          "title": "Draft Id",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "content": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Content",
+          "type": "object"
+        },
+        "author_bindings": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Author Bindings"
+        },
+        "lead_author_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lead Author Id"
+        }
+      },
+      "required": [
+        "action",
+        "draft_id",
+        "expected_version",
+        "content"
+      ],
+      "title": "PacketDraftUpdateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PacketDraftUpdateOperation"
+    },
+    "PacketManagementActionOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "packets.management.delete.v1",
+            "packets.management.release.v1"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "format": "uuid",
+          "title": "Tournament Id",
+          "type": "string"
+        },
+        "assignment_id": {
+          "format": "uuid",
+          "title": "Assignment Id",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "tournament_id",
+        "assignment_id",
+        "expected_version"
+      ],
+      "title": "PacketManagementActionOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PacketManagementActionOperation"
+    },
+    "PacketManagementGetOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "packets.management.get.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "format": "uuid",
+          "title": "Tournament Id",
+          "type": "string"
+        },
+        "assignment_id": {
+          "format": "uuid",
+          "title": "Assignment Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "tournament_id",
+        "assignment_id"
+      ],
+      "title": "PacketManagementGetOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PacketManagementGetOperation"
+    },
+    "PacketManagementUpdateOperation": {
+      "$defs": {
+        "JsonValue": {}
+      },
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "packets.management.update.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "format": "uuid",
+          "title": "Tournament Id",
+          "type": "string"
+        },
+        "assignment_id": {
+          "format": "uuid",
+          "title": "Assignment Id",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "content": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Content",
+          "type": "object"
+        },
+        "changes": {
+          "additionalProperties": {
+            "enum": [
+              "correction",
+              "substitution"
+            ],
+            "type": "string"
+          },
+          "title": "Changes",
+          "type": "object"
+        },
+        "field_author_ids": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Field Author Ids",
+          "type": "object"
+        }
+      },
+      "required": [
+        "action",
+        "tournament_id",
+        "assignment_id",
+        "expected_version",
+        "content",
+        "changes",
+        "field_author_ids"
+      ],
+      "title": "PacketManagementUpdateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PacketManagementUpdateOperation"
+    },
+    "PlayerBanOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "platform.players.ban.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "action",
+        "target"
+      ],
+      "title": "PlayerBanOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PlayerBanOperation"
+    },
+    "PlayerGameResultsOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "players.game_results.get.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "uuid",
+          "title": "Game Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "player_id",
+        "game_id"
+      ],
+      "title": "PlayerGameResultsOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PlayerGameResultsOperation"
+    },
+    "PlayerListOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "players.list.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "ruleset_key": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ruleset Key"
+        },
+        "search": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Search",
+          "type": "string"
+        },
+        "order": {
+          "default": "name_asc",
+          "enum": [
+            "name_asc",
+            "name_desc"
+          ],
+          "title": "Order",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "limit": {
+          "default": 20,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "PlayerListOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PlayerListOperation"
+    },
+    "PlayerProfileOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "players.profile.get.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "ruleset_key": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ruleset Key"
+        }
+      },
+      "required": [
+        "action",
+        "player_id"
+      ],
+      "title": "PlayerProfileOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PlayerProfileOperation"
+    },
+    "PlayerUnbanOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "platform.players.unban.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "target"
+      ],
+      "title": "PlayerUnbanOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:PlayerUnbanOperation"
+    },
+    "TournamentAuthorCreateOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.manager.authors.create.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tournament Id"
+        },
+        "first_name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "First Name",
+          "type": "string"
+        },
+        "second_name": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Second Name"
+        },
+        "surname": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Surname",
+          "type": "string"
+        },
+        "telegram_link": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Telegram Link"
+        },
+        "return_author": {
+          "default": false,
+          "title": "Return Author",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "first_name",
+        "surname"
+      ],
+      "title": "TournamentAuthorCreateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentAuthorCreateOperation"
+    },
+    "TournamentClassicUpdateOperation": {
+      "$defs": {
+        "JsonValue": {}
+      },
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.manager.classic.update.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "format": "uuid",
+          "title": "Tournament Id",
+          "type": "string"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "command": {
+          "enum": [
+            "configure",
+            "seed",
+            "round",
+            "start"
+          ],
+          "title": "Command",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "first",
+            "playoff"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "values": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Values",
+          "type": "object"
+        }
+      },
+      "required": [
+        "action",
+        "tournament_id",
+        "expected_version",
+        "command",
+        "kind"
+      ],
+      "title": "TournamentClassicUpdateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentClassicUpdateOperation"
+    },
+    "TournamentCompleteOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.manager.complete.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tournament Id"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "expected_version"
+      ],
+      "title": "TournamentCompleteOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentCompleteOperation"
+    },
+    "TournamentFinalizeOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.finalize.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tournament Id"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "expected_version"
+      ],
+      "title": "TournamentFinalizeOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentFinalizeOperation"
+    },
+    "TournamentInfoOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.info.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "format": "uuid",
+          "title": "Tournament Id",
+          "type": "string"
+        },
+        "role": {
+          "default": "player",
+          "enum": [
+            "player",
+            "manager",
+            "admin"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "tournament_id"
+      ],
+      "title": "TournamentInfoOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentInfoOperation"
+    },
+    "TournamentListOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.list.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "role": {
+          "default": "player",
+          "enum": [
+            "player",
+            "manager",
+            "admin"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "include_managed_public": {
+          "default": false,
+          "title": "Include Managed Public",
+          "type": "boolean"
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "enum": [
+                "upcoming",
+                "future",
+                "ongoing",
+                "past"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Phase"
+        },
+        "relationship": {
+          "anyOf": [
+            {
+              "enum": [
+                "discoverable",
+                "registered",
+                "approved",
+                "participating",
+                "managed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relationship"
+        },
+        "registration": {
+          "anyOf": [
+            {
+              "enum": [
+                "open",
+                "closed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Registration"
+        },
+        "type_key": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Key"
+        },
+        "ruleset_key": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ruleset Key"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "maxLength": 35,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "search": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Search",
+          "type": "string"
+        },
+        "order": {
+          "default": "starts_asc",
+          "enum": [
+            "starts_asc",
+            "starts_desc",
+            "name_asc",
+            "name_desc"
+          ],
+          "title": "Order",
+          "type": "string"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cursor"
+        },
+        "limit": {
+          "default": 20,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "TournamentListOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentListOperation"
+    },
+    "TournamentManagerManagementOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.manager.management.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tournament Id"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "TournamentManagerManagementOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentManagerManagementOperation"
+    },
+    "TournamentManagerSettingsOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.manager.settings.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tournament Id"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "TournamentManagerSettingsOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentManagerSettingsOperation"
+    },
+    "TournamentManagerSettingsUpdateOperation": {
+      "$defs": {
+        "JsonValue": {}
+      },
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.manager.settings.update.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tournament Id"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "name": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "slug": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Slug",
+          "type": "string"
+        },
+        "type_key": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Type Key",
+          "type": "string"
+        },
+        "game_ruleset_key": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Game Ruleset Key",
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "private"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        },
+        "language": {
+          "maxLength": 35,
+          "minLength": 1,
+          "title": "Language",
+          "type": "string"
+        },
+        "payment_type": {
+          "enum": [
+            "free",
+            "one-time",
+            "per-stage"
+          ],
+          "title": "Payment Type",
+          "type": "string"
+        },
+        "pricing_plans": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Pricing Plans",
+          "type": "array"
+        },
+        "registration_open": {
+          "title": "Registration Open",
+          "type": "boolean"
+        },
+        "registration_open_override": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Registration Open Override"
+        },
+        "ignore_late_registrations": {
+          "default": true,
+          "title": "Ignore Late Registrations",
+          "type": "boolean"
+        },
+        "registration_starts_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Registration Starts At"
+        },
+        "registration_ends_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Registration Ends At"
+        },
+        "starts_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Starts At"
+        },
+        "planned_ends_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Planned Ends At"
+        },
+        "author_names": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Author Names",
+          "type": "array"
+        },
+        "author_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Author Ids",
+          "type": "array"
+        },
+        "default_parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Default Parameters",
+          "type": "object"
+        },
+        "player_mutable_parameters": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Player Mutable Parameters",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "policies": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Policies",
+          "type": "object"
+        }
+      },
+      "required": [
+        "action",
+        "expected_version",
+        "name",
+        "slug",
+        "type_key",
+        "game_ruleset_key",
+        "visibility",
+        "language",
+        "payment_type",
+        "registration_open",
+        "default_parameters",
+        "player_mutable_parameters",
+        "policies"
+      ],
+      "title": "TournamentManagerSettingsUpdateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentManagerSettingsUpdateOperation"
+    },
+    "TournamentPacketAccessUpdateOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.manager.packets.access.update.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tournament Id"
+        },
+        "assignment_id": {
+          "format": "uuid",
+          "title": "Assignment Id",
+          "type": "string"
+        },
+        "player_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Player Id"
+        },
+        "right": {
+          "enum": [
+            "playable",
+            "discoverable",
+            "readable"
+          ],
+          "title": "Right",
+          "type": "string"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "assignment_id",
+        "right",
+        "enabled"
+      ],
+      "title": "TournamentPacketAccessUpdateOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentPacketAccessUpdateOperation"
+    },
+    "TournamentRegisterOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.register.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "format": "uuid",
+          "title": "Tournament Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "tournament_id"
+      ],
+      "title": "TournamentRegisterOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentRegisterOperation"
+    },
+    "TournamentRegistrationDecideOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.manager.registration.decide.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tournament Id"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "approve",
+            "reject"
+          ],
+          "title": "Decision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "player_id",
+        "decision"
+      ],
+      "title": "TournamentRegistrationDecideOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentRegistrationDecideOperation"
+    },
+    "TournamentRegistrationOverrideOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.manager.registration.override.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tournament Id"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        },
+        "registration_open": {
+          "title": "Registration Open",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action",
+        "expected_version",
+        "registration_open"
+      ],
+      "title": "TournamentRegistrationOverrideOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentRegistrationOverrideOperation"
+    },
+    "TournamentStartOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "tournaments.manager.start.v1",
+          "title": "Action",
+          "type": "string"
+        },
+        "tournament_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tournament Id"
+        },
+        "expected_version": {
+          "minimum": 1,
+          "title": "Expected Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "expected_version"
+      ],
+      "title": "TournamentStartOperation",
+      "type": "object",
+      "$id": "urn:sitg:request:TournamentStartOperation"
+    }
+  }
+}

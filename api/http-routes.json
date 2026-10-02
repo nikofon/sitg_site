@@ -1,0 +1,292 @@
+{
+  "contract_date": "2026-09-15",
+  "routes": [
+    {
+      "method": "OPTIONS",
+      "path": "/api/{path}",
+      "request_models": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/session",
+      "request_models": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/session/refresh",
+      "request_models": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/website/session",
+      "request_models": []
+    },
+    {
+      "method": "POST",
+      "path": "/api/website/logout",
+      "request_models": []
+    },
+    {
+      "method": "GET",
+      "path": "/auth/telegram",
+      "request_models": []
+    },
+    {
+      "method": "GET",
+      "path": "/auth/telegram/callback",
+      "request_models": []
+    },
+    {
+      "method": "GET",
+      "path": "/auth/bot",
+      "request_models": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/routes/resolve",
+      "request_models": [
+        "AdminManagementListOperation",
+        "AdminSuspicionLedgerOperation",
+        "LibraryListOperation",
+        "LobbyInfoOperation",
+        "OngoingListOperation",
+        "PacketDraftGetOperation",
+        "PlayerGameResultsOperation",
+        "PlayerListOperation",
+        "PlayerProfileOperation",
+        "TournamentListOperation",
+        "TournamentManagerManagementOperation",
+        "TournamentManagerSettingsOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/library/{version_id}/{command}",
+      "request_models": [
+        "LibraryAccessOperation"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/tournaments/{tournament_id}",
+      "request_models": [
+        "TournamentInfoOperation"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/players/{player_id}",
+      "request_models": [
+        "PlayerProfileOperation"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/players/{player_id}/games/{game_id}",
+      "request_models": [
+        "PlayerGameResultsOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/tournaments/{tournament_id}/register",
+      "request_models": [
+        "TournamentRegisterOperation"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/lobbies/{launch_ref}/events",
+      "request_models": [
+        "LobbyEventsOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/tournaments/{tournament_id}/select",
+      "request_models": [
+        "NavigationTournamentSetOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/lobbies/{launch_ref}/{command}",
+      "request_models": [
+        "LobbyPacketOperation",
+        "LobbyReadyUpdateOperation",
+        "LobbyRoleUpdateOperation",
+        "LobbySettingsUpdateOperation",
+        "LobbySimpleMutationOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/ongoing/lobbies/join",
+      "request_models": [
+        "LobbyJoinOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/ongoing/games/{game_id}/observe",
+      "request_models": [
+        "GameObserveOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/settings",
+      "request_models": [
+        "TournamentManagerSettingsUpdateOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/classic",
+      "request_models": [
+        "TournamentClassicUpdateOperation"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/authors",
+      "request_models": [
+        "AuthorsSearchOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/authors",
+      "request_models": [
+        "TournamentAuthorCreateOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/finalize",
+      "request_models": [
+        "TournamentFinalizeOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/registration-availability",
+      "request_models": [
+        "TournamentRegistrationOverrideOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/registrations/{player_id}",
+      "request_models": [
+        "TournamentRegistrationDecideOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/packet-access",
+      "request_models": [
+        "TournamentPacketAccessUpdateOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/complete",
+      "request_models": [
+        "TournamentCompleteOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/start",
+      "request_models": [
+        "TournamentStartOperation"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/manager/packets/{launch_ref}",
+      "request_models": [
+        "PacketDraftGetOperation"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/packets/{assignment_id}",
+      "request_models": [
+        "PacketManagementActionOperation",
+        "PacketManagementGetOperation",
+        "PacketManagementUpdateOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/tournaments/{launch_ref}/packets/{assignment_id}/{command}",
+      "request_models": [
+        "PacketManagementActionOperation",
+        "PacketManagementGetOperation",
+        "PacketManagementUpdateOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/packets/{launch_ref}",
+      "request_models": [
+        "PacketDraftUpdateOperation"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/manager/packets/{launch_ref}/authors",
+      "request_models": [
+        "AuthorsSearchOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/packets/{launch_ref}/authors",
+      "request_models": [
+        "PacketDraftAuthorCreateOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/manager/packets/{launch_ref}/{decision}",
+      "request_models": [
+        "PacketDraftDecisionOperation"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/admin/suspicion/ledger",
+      "request_models": [
+        "AdminSuspicionLedgerOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/admin/management/{section}/{resource_id}/{command}",
+      "request_models": [
+        "AdminAuthorLinkOperation",
+        "AdminPacketAccessOperation",
+        "AdminTournamentModerateOperation",
+        "PlayerBanOperation",
+        "PlayerUnbanOperation"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/miniapp/admin/suspicion/ledger/{player_id}/events",
+      "request_models": [
+        "AdminSuspicionInspectOperation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/miniapp/admin/suspicion/ledger/{player_id}/clear",
+      "request_models": [
+        "AdminSuspicionClearOperation"
+      ]
+    }
+  ]
+}
