@@ -2,6 +2,8 @@
 
 [English](README.en.md)
 
+ССЫЛКА НА БОТ: https://t.me/SITGsite_bot Сайт бота: https://sitg.site Гитхаб сайта бота: https://github.com/nikofon/sitg_site
+
 Веб-интерфейс SITG для игроков, авторов и организаторов турниров.
 
 ## Возможности
